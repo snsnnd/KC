@@ -22,21 +22,23 @@
     document.querySelector("#memberUsername").textContent = `@${member.username}`;
     document.querySelector("#memberStudent").textContent = [member.studentId, member.className].filter(Boolean).join(" / ") || "未填写";
     document.querySelector("#memberPermissions").textContent = member.permissions.length ? member.permissions.join(" / ") : "PUBLIC ONLY";
-    await renderResources(await api("/api/member/resources"));
-    await renderResourceManagement(await api("/api/member/resource-management"));
+    const [resources, resourceManagement] = await Promise.all([api("/api/member/resources"), api("/api/member/resource-management")]);
+    renderResources(resources);
+    renderResourceManagement(resourceManagement);
     const requestedResource = new URLSearchParams(window.location.search).get("resource");
     if (requestedResource) document.querySelector(`[data-resource-id="${CSS.escape(requestedResource)}"] button`)?.click();
   }
 
-  async function renderResources(resources) {
+  function renderResources(resources) {
     const list = document.querySelector("#memberResources");
+    document.querySelector("#memberResourceModule").hidden = resources.length === 0;
     list.replaceChildren();
     resources.forEach((resource) => {
       const article = document.createElement("article");
-      article.className = `member-resource${resource.authorized ? " is-authorized" : " is-locked"}`;
+      article.className = "member-resource is-authorized";
       article.dataset.resourceId = resource.id;
       const state = document.createElement("span");
-      state.textContent = resource.authorized ? "[ ACCESS: GRANTED ]" : "[ ACCESS: DENIED ]";
+      state.textContent = "[ ACCESS: GRANTED ]";
       const title = document.createElement("h3");
       title.textContent = resource.title;
       const description = document.createElement("p");
@@ -45,8 +47,7 @@
       permission.textContent = resource.permissionKey || "PUBLIC";
       const action = document.createElement("button");
       action.type = "button";
-      action.textContent = resource.authorized ? "读取访问凭据 →" : "权限不足";
-      action.disabled = !resource.authorized;
+      action.textContent = "读取访问凭据 →";
       action.addEventListener("click", async () => {
         action.disabled = true;
         action.textContent = "VERIFYING...";
@@ -99,12 +100,16 @@
       option.textContent = `${account.name} / ${account.currency}`;
       fundSelect.appendChild(option);
     });
-    const canRequestMaterial = member.permissions.includes("*") || member.permissions.includes("material.request");
-    const canRequestFund = member.permissions.includes("*") || member.permissions.includes("fund.request");
+    const canRequestMaterial = data.capabilities.materialRequests;
+    const canRequestFund = data.capabilities.fundRequests;
+    document.querySelector("#memberRequestModule").hidden = !canRequestMaterial && !canRequestFund;
+    document.querySelector("#materialRequestForm").hidden = !canRequestMaterial;
+    document.querySelector("#fundRequestForm").hidden = !canRequestFund;
+    document.querySelector("#memberHistoryModule").hidden = !data.capabilities.requestHistory;
     document.querySelector("#materialRequestForm").classList.toggle("is-disabled", !canRequestMaterial || !data.inventory.length);
     document.querySelector("#fundRequestForm").classList.toggle("is-disabled", !canRequestFund || !data.funds.length);
-    document.querySelector("#materialRequestForm [data-status]").textContent = canRequestMaterial ? (data.inventory.length ? "" : "当前暂无可申请材料") : "缺少权限 material.request";
-    document.querySelector("#fundRequestForm [data-status]").textContent = canRequestFund ? (data.funds.length ? "" : "当前暂无资金账户") : "缺少权限 fund.request";
+    document.querySelector("#materialRequestForm [data-status]").textContent = data.inventory.length ? "" : "当前暂无可申请材料";
+    document.querySelector("#fundRequestForm [data-status]").textContent = data.funds.length ? "" : "当前暂无资金账户";
     renderRequestHistory(data.requests);
   }
 
@@ -167,6 +172,6 @@
       await renderResourceManagement(await api("/api/member/resource-management"));
     } catch (error) { status.textContent = error.message; }
   }
-  logout.addEventListener("click", async () => { await api("/api/member/logout", { method: "POST", body: "{}" }); window.location.reload(); });
+  logout.addEventListener("click", async () => { await api("/api/member/logout", { method: "POST", body: "{}" }); window.location.assign("/portal.html?type=member"); });
   api("/api/member/session").then((payload) => openDashboard(payload.member)).catch(() => {});
 })();

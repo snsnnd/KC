@@ -1,7 +1,12 @@
 (function () {
   "use strict";
 
-  const state = { csrf: "", user: null, content: null, applications: [], mail: null, managers: [], members: [], resourceSecrets: {}, notifications: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], audit: [], syncTimer: 0 };
+  const state = { csrf: "", user: null, workspace: "home", content: null, applications: [], mail: null, managers: [], members: [], resourceSecrets: {}, notifications: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], audit: [], syncTimer: 0 };
+  const workspaces = {
+    operations: { name: "运营宣发", code: "OPERATIONS", panels: ["settings", "projects", "mail", "notifications", "uploads"] },
+    people: { name: "人员管理", code: "PEOPLE", panels: ["departments", "applications", "members", "managers", "audit"] },
+    assets: { name: "资源与资金", code: "ASSETS", panels: ["resources", "inventory", "funds", "usage"] }
+  };
   const loginView = document.querySelector("#loginView");
   const adminView = document.querySelector("#adminView");
   const saveStatus = document.querySelector("#saveStatus");
@@ -723,12 +728,34 @@
     const role = state.user.role;
     document.querySelectorAll("[data-owner-only]").forEach((element) => { element.hidden = role !== "owner"; });
     document.querySelectorAll("[data-inventory-edit]").forEach((element) => { element.hidden = !["owner", "editor"].includes(role); });
-    const allowed = role === "reviewer" ? new Set(["applications", "members", "audit", "inventory", "funds", "usage"]) : role === "editor" ? new Set(["settings", "projects", "departments", "resources", "applications", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"]) : null;
-    if (allowed) {
-      document.querySelectorAll(".admin-nav button[data-panel]").forEach((button) => { if (!allowed.has(button.dataset.panel)) button.hidden = true; });
-      const activeButton = document.querySelector(".admin-nav button.is-active:not([hidden])") || document.querySelector(`.admin-nav button[data-panel="${role === "reviewer" ? "applications" : "settings"}"]`);
-      activeButton?.click();
+    const allowedPanels = role === "reviewer" ? new Set(["applications", "members", "audit", "inventory", "funds", "usage"]) : role === "editor" ? new Set(["settings", "projects", "departments", "resources", "applications", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"]) : new Set(Object.values(workspaces).flatMap((workspace) => workspace.panels));
+    document.querySelectorAll("[data-workspace-card]").forEach((card) => { card.hidden = !card.dataset.roles.split(",").includes(role); });
+    const requestedWorkspace = new URLSearchParams(window.location.search).get("workspace");
+    state.workspace = workspaces[requestedWorkspace] ? requestedWorkspace : "home";
+    const workspace = workspaces[state.workspace];
+    document.querySelector("#workspaceName").textContent = workspace ? `${workspace.code} WORKSPACE` : "WORKSPACE HUB";
+    document.querySelector("#workspaceContext").textContent = workspace ? workspace.name : "SELECT WORKSPACE";
+    document.title = workspace ? `${workspace.name} | TSL Control` : "后台工作区 | TSL Control";
+    document.querySelectorAll(".admin-nav button[data-panel]").forEach((button) => {
+      button.hidden = !workspace || button.dataset.workspace !== state.workspace || !allowedPanels.has(button.dataset.panel);
+      button.classList.remove("is-active");
+    });
+    document.querySelectorAll(".admin-panel").forEach((panel) => panel.classList.remove("is-active"));
+    if (!workspace) {
+      document.querySelector('[data-panel-view="workspace"]').classList.add("is-active");
+      return;
     }
+    const requestedPanel = window.location.hash.slice(1);
+    const target = document.querySelector(`.admin-nav button[data-workspace="${state.workspace}"][data-panel="${CSS.escape(requestedPanel)}"]:not([hidden])`) || document.querySelector(`.admin-nav button[data-workspace="${state.workspace}"]:not([hidden])`);
+    if (!target) {
+      state.workspace = "home";
+      document.querySelector("#workspaceName").textContent = "WORKSPACE HUB";
+      document.querySelector("#workspaceContext").textContent = "SELECT WORKSPACE";
+      document.querySelector('[data-panel-view="workspace"]').classList.add("is-active");
+      window.history.replaceState(null, "", "/admin.html");
+      return;
+    }
+    target.click();
   }
 
   async function checkRemoteUpdates() {
@@ -831,9 +858,10 @@
     }
   });
 
-  document.querySelectorAll(".admin-nav button").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll(".admin-nav button[data-panel]").forEach((button) => button.addEventListener("click", () => {
     document.querySelectorAll(".admin-nav button").forEach((item) => item.classList.toggle("is-active", item === button));
     document.querySelectorAll(".admin-panel").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.panelView === button.dataset.panel));
+    if (state.workspace !== "home") window.history.replaceState(null, "", `/admin.html?workspace=${state.workspace}#${button.dataset.panel}`);
   }));
   document.querySelectorAll(".save-button").forEach((button) => button.addEventListener("click", saveContent));
   document.querySelector("#adminProjectSearch").addEventListener("input", filterProjectEditor);
@@ -849,7 +877,7 @@
     await loadDashboard();
     setStatus("SYNC COMPLETE");
   });
-  document.querySelector("#logoutButton").addEventListener("click", async () => { await api("/api/admin/logout", { method: "POST", body: "{}" }); window.location.reload(); });
+  document.querySelector("#logoutButton").addEventListener("click", async () => { await api("/api/admin/logout", { method: "POST", body: "{}" }); window.location.assign("/portal.html?type=admin"); });
 
   document.querySelector("#managerForm").addEventListener("submit", async (event) => {
     event.preventDefault();

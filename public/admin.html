@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex,nofollow">
   <meta name="theme-color" content="#08080a">
   <title>TSL Control | 内容管理</title>
-  <link rel="stylesheet" href="assets/css/admin.css?v=7">
+  <link rel="stylesheet" href="assets/css/admin.css?v=8">
 </head>
 <body>
   <main class="login-shell" id="loginView">
@@ -18,33 +18,43 @@
       <label>管理员密码<input id="adminPassword" type="password" autocomplete="current-password" required></label>
       <button type="submit">AUTHENTICATE <span>↗</span></button>
       <p class="form-message" id="loginMessage" role="status"></p>
-      <a href="/">← 返回网站</a>
+      <a href="/portal.html?type=admin">← 返回统一入口</a>
     </form>
   </main>
 
   <div class="admin-shell" id="adminView" hidden>
     <header class="admin-header">
-      <a class="admin-brand" href="/"><i></i><span><b>TSL CONTROL</b><small>CONTENT OPERATIONS</small></span></a>
-      <div class="admin-actions"><span id="saveStatus">SYSTEM READY</span><button id="syncButton" type="button" hidden>发现远端更新 / 同步</button><span id="currentUser"></span><a href="/" target="_blank">预览网站 ↗</a><button id="logoutButton" type="button">退出</button></div>
+      <a class="admin-brand" href="/admin.html"><i></i><span><b>TSL CONTROL</b><small id="workspaceName">WORKSPACE HUB</small></span></a>
+      <div class="admin-actions"><span id="saveStatus">SYSTEM READY</span><button id="syncButton" type="button" hidden>发现远端更新 / 同步</button><span id="currentUser"></span><a href="/admin.html">切换后台</a><a href="/" target="_blank">预览网站 ↗</a><button id="logoutButton" type="button">退出</button></div>
     </header>
     <aside class="admin-nav" aria-label="后台导航">
-      <button class="is-active" data-panel="settings" type="button"><span>01</span>基础信息</button>
-      <button data-panel="projects" type="button"><span>02</span>项目内容</button>
-      <button data-panel="departments" type="button"><span>03</span>招新部门</button>
-      <button data-panel="resources" type="button"><span>04</span>资源链接</button>
-      <button data-panel="applications" type="button"><span>05</span>申请收件箱 <i id="applicationBadge">0</i></button>
-      <button data-panel="mail" type="button"><span>06</span>邮件通知</button>
-      <button data-panel="notifications" type="button"><span>07</span>通知中心</button>
-      <button data-panel="uploads" type="button"><span>08</span>媒体上传</button>
-      <button data-panel="members" type="button"><span>09</span>人员管理</button>
-      <button data-panel="managers" data-owner-only type="button"><span>10</span>管理员</button>
-      <button data-panel="audit" type="button"><span>11</span>操作日志</button>
-      <button data-panel="inventory" type="button"><span>12</span>物资库存</button>
-      <button data-panel="funds" type="button"><span>13</span>资金账户</button>
-      <button data-panel="usage" type="button"><span>14</span>使用审批 <i id="usageBadge">0</i></button>
+      <a class="admin-nav__home" href="/admin.html"><span>00</span>工作区总览</a>
+      <p class="admin-nav__context" id="workspaceContext">SELECT WORKSPACE</p>
+      <button data-workspace="operations" data-panel="settings" type="button"><span>01</span>基础信息</button>
+      <button data-workspace="operations" data-panel="projects" type="button"><span>02</span>项目内容</button>
+      <button data-workspace="people" data-panel="departments" type="button"><span>03</span>招新部门</button>
+      <button data-workspace="assets" data-panel="resources" type="button"><span>04</span>资源链接</button>
+      <button data-workspace="people" data-panel="applications" type="button"><span>05</span>申请收件箱 <i id="applicationBadge">0</i></button>
+      <button data-workspace="operations" data-panel="mail" type="button"><span>06</span>邮件通知</button>
+      <button data-workspace="operations" data-panel="notifications" type="button"><span>07</span>通知中心</button>
+      <button data-workspace="operations" data-panel="uploads" type="button"><span>08</span>媒体上传</button>
+      <button data-workspace="people" data-panel="members" type="button"><span>09</span>人员管理</button>
+      <button data-workspace="people" data-panel="managers" data-owner-only type="button"><span>10</span>管理员</button>
+      <button data-workspace="people" data-panel="audit" type="button"><span>11</span>操作日志</button>
+      <button data-workspace="assets" data-panel="inventory" type="button"><span>12</span>物资库存</button>
+      <button data-workspace="assets" data-panel="funds" type="button"><span>13</span>资金账户</button>
+      <button data-workspace="assets" data-panel="usage" type="button"><span>14</span>使用审批 <i id="usageBadge">0</i></button>
     </aside>
     <main class="admin-content">
-      <section class="admin-panel is-active" data-panel-view="settings">
+      <section class="admin-panel is-active" data-panel-view="workspace">
+        <div class="workspace-hero"><div><p>// CONTROL PLANE DIRECTORY</p><h1>选择子后台</h1></div><span>权限会依据当前管理员角色自动收敛</span></div>
+        <div class="workspace-grid">
+          <a class="workspace-card" data-workspace-card="operations" data-roles="owner,editor" href="/admin.html?workspace=operations"><span>01 / OPERATIONS</span><h2>运营宣发</h2><p>官网内容、项目展示、媒体上传、邮件通道与定向通知。</p><b>进入运营后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="people" data-roles="owner,editor,reviewer" href="/admin.html?workspace=people"><span>02 / PEOPLE</span><h2>人员管理</h2><p>招新部门、申请审核、成员权限、管理员角色与操作审计。</p><b>进入人员后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="assets" data-roles="owner,editor,reviewer" href="/admin.html?workspace=assets"><span>03 / ASSETS</span><h2>资源与资金</h2><p>受保护资源、物资库存、资金账户和材料资金使用审批。</p><b>进入资源后台 →</b></a>
+        </div>
+      </section>
+      <section class="admin-panel" data-panel-view="settings">
         <div class="panel-heading"><div><p>// GENERAL PARAMETERS</p><h1>基础信息</h1></div><button class="save-button" type="button">保存更改</button></div>
         <div class="form-grid" id="settingsEditor"></div>
       </section>
@@ -163,6 +173,6 @@
       </section>
     </main>
   </div>
-  <script src="assets/js/admin.js?v=8"></script>
+  <script src="assets/js/admin.js?v=9"></script>
 </body>
 </html>

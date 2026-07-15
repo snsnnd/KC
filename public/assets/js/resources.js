@@ -52,7 +52,7 @@
     external.className = "external-button";
     external.textContent = resource.protected ? "MEMBER LOGIN REQUIRED →" : resource.url ? "CONFIRM & OPEN EXTERNAL RESOURCE ↗" : "ENDPOINT NOT CONFIGURED";
     if (resource.protected) {
-      external.href = `/member.html?resource=${encodeURIComponent(resource.id)}`;
+      external.href = `/portal.html?type=member&next=${encodeURIComponent(`/member.html?resource=${resource.id}`)}`;
     } else if (resource.url) {
       external.href = resource.url;
       external.target = "_blank";

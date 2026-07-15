@@ -35,8 +35,12 @@
 
 ## 功能入口
 
+- 统一入口：`/portal.html`
 - 官网：`/`
-- 管理后台：`/admin.html`
+- 后台工作区总览：`/admin.html`
+- 运营宣发后台：`/admin.html?workspace=operations`
+- 人员管理后台：`/admin.html?workspace=people`
+- 资源与资金后台：`/admin.html?workspace=assets`
 - 加入申请：`/join.html`
 - 资源中心：`/resources.html`
 - 成员中心：`/member.html`
@@ -46,6 +50,8 @@
 加入申请要求填写姓名、学号、班级、联系方式、申请部门和申请理由。申请转为成员后，学号和班级会保留在成员档案中。
 
 物资和资金使用必须由成员提交申请，经主管理员或审核员批准后才会在串行锁中校验并扣减。所有访问、申请、审批、库存和资金操作均写入审计记录。
+
+管理员和成员从统一入口选择身份登录。后台按管理员角色显示可进入的子后台；成员中心由服务端根据资源权限、`material.request` 和 `fund.request` 生成可见模块，未授权资源、库存和资金账户不会返回浏览器。
 
 ## 本地运行
 
@@ -69,6 +75,7 @@ python3 -m http.server 8080 --directory public
 cd backend
 npm run check
 npm run test:applications
+npm run test:permissions
 npm run test:resources
 ```
 

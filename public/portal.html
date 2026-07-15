@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>统一入口 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=5"></head>
+<body class="portal-page">
+  <header class="sub-header"><a class="sub-brand" href="/"><i></i><span>TECH SYNERGY LAB</span></a><a href="/">← RETURN TO SYSTEM</a></header>
+  <main class="portal-shell">
+    <section class="portal-intro">
+      <span class="sub-kicker">[ UNIFIED ACCESS GATE ]</span>
+      <h1>进入你的<br><em>工作空间。</em></h1>
+      <p>管理员进入运营、人员或资源资金后台；成员进入个人中心。系统会根据账号角色和权限，只展示允许使用的功能。</p>
+      <div class="portal-signal"><i></i><span>IDENTITY ROUTING ONLINE</span></div>
+    </section>
+    <section class="portal-access">
+      <div class="portal-tabs" role="tablist" aria-label="选择账号类型">
+        <button class="is-active" data-account-type="member" type="button"><span>01</span>成员入口</button>
+        <button data-account-type="admin" type="button"><span>02</span>管理入口</button>
+      </div>
+      <form class="portal-form" id="portalLogin">
+        <input name="accountType" type="hidden" value="member">
+        <div><span class="sub-kicker" id="portalKicker">// MEMBER IDENTITY</span><h2 id="portalTitle">成员登录</h2></div>
+        <label class="form-field">账号<input name="username" autocomplete="username" required></label>
+        <label class="form-field">密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="submit-button" type="submit">ENTER WORKSPACE <span>→</span></button>
+        <p class="form-status" id="portalStatus" role="status"></p>
+      </form>
+      <div class="portal-sessions" id="portalSessions" hidden></div>
+    </section>
+  </main>
+  <script src="assets/js/portal.js?v=1"></script>
+</body>
+</html>

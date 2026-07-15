@@ -251,8 +251,14 @@ function requireAdmin(request, response, next) {
     if (token) sessions.delete(token);
     return response.status(401).json({ error: "请重新登录" });
   }
+  const admin = readJson(adminFile).find((item) => item.id === session.user.id);
+  if (!admin) {
+    sessions.delete(token);
+    return response.status(401).json({ error: "管理员账号已失效" });
+  }
   if (request.method !== "GET" && request.get("x-csrf-token") !== session.csrf) return response.status(403).json({ error: "安全令牌无效" });
   session.expiresAt = Date.now() + 8 * 60 * 60 * 1000;
+  session.user = publicAdmin(admin);
   request.adminSession = session;
   request.adminUser = session.user;
   next();
@@ -449,13 +455,13 @@ app.post("/api/member/logout", requireMember, (request, response) => {
   response.json({ ok: true });
 });
 app.get("/api/member/resources", requireMember, (request, response) => {
-  const resources = readJson(contentFile).resources.map((resource) => ({
+  const resources = readJson(contentFile).resources.filter((resource) => canAccessResource(request.member, resource)).map((resource) => ({
     id: resource.id,
     title: resource.title,
     description: resource.description,
     type: resource.type,
     permissionKey: resource.permissionKey,
-    authorized: canAccessResource(request.member, resource)
+    authorized: true
   }));
   response.json(resources);
 });
@@ -470,10 +476,12 @@ app.get("/api/member/resources/:id", requireMember, (request, response) => {
   response.json({ ...resource, accessSecret: resourceSecrets[resource.id] || "" });
 });
 app.get("/api/member/resource-management", requireMember, (request, response) => {
-  const inventory = readJson(inventoryFile).filter((item) => item.status === "active").map((item) => ({ id: item.id, name: item.name, sku: item.sku, category: item.category, unit: item.unit, available: item.quantity, location: item.location }));
-  const funds = readJson(fundFile).accounts.filter((account) => account.status === "active").map((account) => ({ id: account.id, name: account.name, currency: account.currency }));
+  const canRequestMaterial = request.member.permissions.includes("*") || request.member.permissions.includes("material.request");
+  const canRequestFund = request.member.permissions.includes("*") || request.member.permissions.includes("fund.request");
+  const inventory = canRequestMaterial ? readJson(inventoryFile).filter((item) => item.status === "active").map((item) => ({ id: item.id, name: item.name, sku: item.sku, category: item.category, unit: item.unit, available: item.quantity, location: item.location })) : [];
+  const funds = canRequestFund ? readJson(fundFile).accounts.filter((account) => account.status === "active").map((account) => ({ id: account.id, name: account.name, currency: account.currency })) : [];
   const requests = readJson(usageRequestFile).filter((item) => item.memberId === request.member.id);
-  response.json({ inventory, funds, requests });
+  response.json({ inventory, funds, requests, capabilities: { materialRequests: canRequestMaterial, fundRequests: canRequestFund, requestHistory: requests.length > 0 || canRequestMaterial || canRequestFund } });
 });
 app.post("/api/member/usage-requests", requireMember, async (request, response) => {
   const type = request.body.type;
@@ -732,6 +740,7 @@ app.patch("/api/admin/managers/:id", requireAdmin, requireRole("owner"), async (
   }
   admin.updatedAt = new Date().toISOString();
   await writeJson(adminFile, admins);
+  if (request.body.password) for (const [token, session] of sessions) if (session.user.id === admin.id) sessions.delete(token);
   appendAudit(request, request.adminUser, "manager.update", admin.username, { role: admin.role, passwordChanged: Boolean(request.body.password) });
   response.json({ ok: true, manager: publicAdmin(admin) });
 });
@@ -779,7 +788,7 @@ app.patch("/api/admin/members/:id", requireAdmin, requireRole("owner"), async (r
   }
   member.updatedAt = new Date().toISOString();
   await writeJson(memberFile, members);
-  if (member.status !== "active") for (const [token, session] of memberSessions) if (session.member.id === member.id) memberSessions.delete(token);
+  if (member.status !== "active" || request.body.password) for (const [token, session] of memberSessions) if (session.member.id === member.id) memberSessions.delete(token);
   appendAudit(request, request.adminUser, "member.update", member.username, { permissions: member.permissions, status: member.status, passwordChanged: Boolean(request.body.password) });
   response.json({ ok: true, member: publicMember(member) });
 });

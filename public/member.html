@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>成员中心 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=4"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>成员中心 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=5"></head>
 <body>
-  <header class="sub-header"><a class="sub-brand" href="/"><i></i><span>TECH SYNERGY LAB</span></a><div class="member-header"><span id="memberIdentity">MEMBER ACCESS</span><button id="memberLogout" type="button" hidden>退出</button><a href="/resources.html">资源索引 →</a></div></header>
+  <header class="sub-header"><a class="sub-brand" href="/portal.html"><i></i><span>MEMBER WORKSPACE</span></a><div class="member-header"><span id="memberIdentity">MEMBER ACCESS</span><button id="memberLogout" type="button" hidden>退出</button><a href="/portal.html">统一入口 →</a></div></header>
   <main>
     <section class="sub-hero member-hero"><div><span class="sub-kicker">[ AUTHORIZED PERSONNEL ONLY ]</span><h1>成员中心。</h1></div><p>成员账号由管理员创建。系统根据你的权限集合决定哪些内部资料、网盘链接和提取码可以读取，所有访问都会写入安全日志。</p></section>
     <section class="sub-content">
@@ -12,15 +12,18 @@
         <label class="form-field">成员密码<input name="password" type="password" autocomplete="current-password" required></label>
         <button class="submit-button" type="submit">AUTHORIZE SESSION <span>→</span></button>
         <p class="form-status" id="memberLoginStatus" role="status"></p>
+        <a class="member-login__portal" href="/portal.html?type=member">通过统一入口登录 →</a>
       </form>
       <div class="member-dashboard" id="memberDashboard" hidden>
         <div class="member-profile"><div><span class="sub-kicker">// ACTIVE IDENTITY</span><h2 id="memberName"></h2></div><div><span>ACCOUNT</span><b id="memberUsername"></b><span>STUDENT</span><b id="memberStudent"></b><span>PERMISSIONS</span><b id="memberPermissions"></b></div></div>
-        <div class="section-title"><div><span class="sub-kicker">// ACCESS MATRIX</span><h2>内部资源</h2></div><p>SERVER-SIDE ACL</p></div>
-        <div class="member-resource-list" id="memberResources"></div>
-        <section class="member-section">
+        <section id="memberResourceModule" hidden>
+          <div class="section-title"><div><span class="sub-kicker">// ACCESS MATRIX</span><h2>我的内部资源</h2></div><p>AUTHORIZED ONLY</p></div>
+          <div class="member-resource-list" id="memberResources"></div>
+        </section>
+        <section class="member-section" id="memberRequestModule" hidden>
           <div class="section-title"><div><span class="sub-kicker">// APPROVAL GATE</span><h2>材料与资金申请</h2></div><p>APPROVAL REQUIRED</p></div>
           <div class="request-form-grid">
-            <form class="application-form member-request-form" id="materialRequestForm">
+            <form class="application-form member-request-form" id="materialRequestForm" hidden>
               <h3>材料使用申请</h3>
               <label class="form-field">材料<select id="materialTarget" name="targetId" required></select></label>
               <label class="form-field">数量<input name="quantity" type="number" min="0.01" step="0.01" required></label>
@@ -28,7 +31,7 @@
               <button class="submit-button" type="submit">SUBMIT MATERIAL REQUEST <span>→</span></button>
               <p class="form-status" data-status role="status"></p>
             </form>
-            <form class="application-form member-request-form" id="fundRequestForm">
+            <form class="application-form member-request-form" id="fundRequestForm" hidden>
               <h3>资金使用申请</h3>
               <label class="form-field">资金账户<select id="fundTarget" name="targetId" required></select></label>
               <label class="form-field">金额<input name="amount" type="number" min="0.01" step="0.01" required></label>
@@ -38,13 +41,13 @@
             </form>
           </div>
         </section>
-        <section class="member-section">
+        <section class="member-section" id="memberHistoryModule" hidden>
           <div class="section-title"><div><span class="sub-kicker">// REQUEST HISTORY</span><h2>我的申请</h2></div><p>LIVE STATUS</p></div>
           <div class="member-request-list" id="memberRequestList"></div>
         </section>
       </div>
     </section>
   </main>
-  <script src="assets/js/member.js?v=2"></script>
+  <script src="assets/js/member.js?v=3"></script>
 </body>
 </html>

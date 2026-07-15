@@ -18,7 +18,7 @@ assert.equal(health.body.ok, true);
 const content = await json("/api/content");
 assert.ok(content.body.projects.every((project) => project.category), "a project is missing its category");
 
-for (const path of ["/", "/admin.html", "/join.html", "/member.html", "/assets/css/home.css", "/assets/js/app.js"]) {
+for (const path of ["/", "/portal.html", "/admin.html", "/admin.html?workspace=operations", "/admin.html?workspace=people", "/admin.html?workspace=assets", "/join.html", "/member.html", "/assets/css/home.css", "/assets/js/app.js", "/assets/js/portal.js"]) {
   const response = await fetch(`${base}${path}`);
   assert.equal(response.status, 200, `${path} did not load`);
 }
