@@ -23,9 +23,12 @@ const inventoryFile = path.join(dataDirectory, "inventory.json");
 const inventoryLedgerFile = path.join(dataDirectory, "inventory-ledger.json");
 const fundFile = path.join(dataDirectory, "funds.json");
 const usageRequestFile = path.join(dataDirectory, "usage-requests.json");
+const emailApprovalTokenFile = path.join(dataDirectory, "email-approval-tokens.json");
 const adminPassword = process.env.ADMIN_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const secureCookies = process.env.COOKIE_SECURE === "true";
+const publicBaseUrl = cleanString(process.env.PUBLIC_BASE_URL, 500).replace(/\/$/, "");
+const emailApprovalTtlMs = Math.max(1, Math.min(Number(process.env.EMAIL_APPROVAL_TTL_HOURS) || 24, 72)) * 60 * 60 * 1000;
 const adminPanelKeys = ["settings", "projects", "departments", "resources", "applications", "mail", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"];
 const assignableAdminPanelKeySet = new Set(adminPanelKeys.filter((panel) => panel !== "mail"));
 
@@ -39,6 +42,7 @@ if (!fs.existsSync(inventoryFile)) fs.writeFileSync(inventoryFile, "[]\n", { mod
 if (!fs.existsSync(inventoryLedgerFile)) fs.writeFileSync(inventoryLedgerFile, "[]\n", { mode: 0o600 });
 if (!fs.existsSync(fundFile)) fs.writeFileSync(fundFile, "{\"accounts\":[],\"ledger\":[]}\n", { mode: 0o600 });
 if (!fs.existsSync(usageRequestFile)) fs.writeFileSync(usageRequestFile, "[]\n", { mode: 0o600 });
+if (!fs.existsSync(emailApprovalTokenFile)) fs.writeFileSync(emailApprovalTokenFile, "[]\n", { mode: 0o600 });
 
 const app = express();
 app.disable("x-powered-by");
@@ -268,6 +272,28 @@ function rateLimited(key, limit, interval) {
   return bucket.length > limit;
 }
 
+function consumeRateLimits(rules) {
+  const now = Date.now();
+  const buckets = rules.map((rule) => ({ ...rule, entries: (rateBuckets.get(rule.key) || []).filter((time) => now - time < rule.interval) }));
+  buckets.forEach((bucket) => rateBuckets.set(bucket.key, bucket.entries));
+  const blocked = buckets.find((bucket) => bucket.entries.length >= bucket.limit);
+  if (blocked) return { allowed: false, retryAfter: Math.max(1, Math.ceil((blocked.interval - (now - blocked.entries[0])) / 1000)), scope: blocked.scope };
+  buckets.forEach((bucket) => {
+    bucket.entries.push(now);
+    rateBuckets.set(bucket.key, bucket.entries);
+  });
+  return { allowed: true, reservations: buckets.map((bucket) => ({ key: bucket.key, timestamp: now })) };
+}
+
+function releaseRateLimits(reservations) {
+  (reservations || []).forEach(({ key, timestamp }) => {
+    const entries = [...(rateBuckets.get(key) || [])];
+    const index = entries.indexOf(timestamp);
+    if (index >= 0) entries.splice(index, 1);
+    rateBuckets.set(key, entries);
+  });
+}
+
 function requireAdmin(request, response, next) {
   const token = parseCookies(request).tech_admin;
   const session = token && sessions.get(token);
@@ -417,6 +443,146 @@ async function sendOperationalMail(subject, text, recipients) {
   }
 }
 
+function emailApprovalTokenHash(token) {
+  return crypto.createHmac("sha256", sessionSecret).update(token).digest("hex");
+}
+
+function isEmailApprover(admin, usageRequest) {
+  if (!admin?.email) return false;
+  const user = publicAdmin(admin);
+  return (user.role === "owner" || (user.role === "reviewer" && hasAdminPanel(user, "usage"))) && canAccessDepartment(user, usageRequestDepartmentId(usageRequest));
+}
+
+function resolveEmailApprovalToken(rawToken, tokenRecords = readJson(emailApprovalTokenFile), usageRequests = readJson(usageRequestFile), admins = readJson(adminFile)) {
+  const token = cleanString(rawToken, 200);
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return { status: 404, error: "审批链接无效" };
+  const tokenRecord = tokenRecords.find((record) => record.tokenHash === emailApprovalTokenHash(token));
+  if (!tokenRecord) return { status: 404, error: "审批链接无效" };
+  if (tokenRecord.usedAt || tokenRecord.invalidatedAt) return { status: 410, error: "审批链接已使用或已失效" };
+  if (Date.parse(tokenRecord.expiresAt) <= Date.now()) return { status: 410, error: "审批链接已过期" };
+  const usageRequest = usageRequests.find((item) => item.id === tokenRecord.requestId);
+  if (!usageRequest || usageRequest.status !== "pending") return { status: 410, error: "该申请已处理或撤销" };
+  const admin = admins.find((item) => item.id === tokenRecord.adminId);
+  if (!admin || !isEmailApprover(admin, usageRequest)) return { status: 403, error: "审批权限已撤销" };
+  if (!['approved', 'rejected'].includes(tokenRecord.action)) return { status: 404, error: "审批链接无效" };
+  return { token, tokenRecord, usageRequest, admin, adminUser: publicAdmin(admin) };
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
+
+async function sendUsageApprovalEmails(usageRequest) {
+  if (!mailer || !mailConfig || !/^https?:\/\//.test(publicBaseUrl)) return false;
+  const seenEmails = new Set();
+  const approvers = readJson(adminFile).filter((admin) => {
+    if (!isEmailApprover(admin, usageRequest)) return false;
+    const email = admin.email.toLowerCase();
+    if (seenEmails.has(email)) return false;
+    seenEmails.add(email);
+    return true;
+  });
+  if (!approvers.length) return false;
+  const expiresAt = new Date(Date.now() + emailApprovalTtlMs).toISOString();
+  const issued = approvers.map((admin) => {
+    const approveToken = crypto.randomBytes(32).toString("base64url");
+    const rejectToken = crypto.randomBytes(32).toString("base64url");
+    return { admin, approveToken, rejectToken };
+  });
+  await withResourceLock(async () => {
+    const existing = readJson(emailApprovalTokenFile);
+    existing.forEach((record) => {
+      if (record.requestId === usageRequest.id && !record.usedAt && !record.invalidatedAt) {
+        record.invalidatedAt = new Date().toISOString();
+        record.invalidatedReason = "reissued";
+      }
+    });
+    issued.forEach(({ admin, approveToken, rejectToken }) => {
+      [["approved", approveToken], ["rejected", rejectToken]].forEach(([action, token]) => existing.unshift({ id: `MAILAPP-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, tokenHash: emailApprovalTokenHash(token), requestId: usageRequest.id, adminId: admin.id, action, expiresAt, createdAt: new Date().toISOString() }));
+    });
+    await writeJson(emailApprovalTokenFile, existing.filter((record) => !record.invalidatedAt || Date.now() - Date.parse(record.invalidatedAt) < 30 * 24 * 60 * 60 * 1000).slice(0, 10000));
+  });
+  const departmentName = readJson(contentFile).departments.find((department) => department.id === usageRequest.departmentId)?.name || usageRequest.departmentId || "未分配部门";
+  const value = usageRequest.type === "material" ? `${usageRequest.quantity} ${usageRequest.unit}` : `${Number(usageRequest.amount).toFixed(2)} ${usageRequest.currency}`;
+  const subject = `[待审批] ${usageRequest.memberName} 的${usageRequest.type === "material" ? "材料" : "资金"}申请 ${usageRequest.id}`;
+  const deliveries = await Promise.allSettled(issued.map(async ({ admin, approveToken, rejectToken }) => {
+    const approveUrl = `${publicBaseUrl}/email-approval.html#token=${approveToken}`;
+    const rejectUrl = `${publicBaseUrl}/email-approval.html#token=${rejectToken}`;
+    const text = `审批人：${admin.displayName}\n申请编号：${usageRequest.id}\n申请人：${usageRequest.memberName}\n部门：${departmentName}\n对象：${usageRequest.targetName}\n数量/金额：${value}\n用途：${usageRequest.purpose}\n\n批准：${approveUrl}\n拒绝：${rejectUrl}\n\n链接将在 ${expiresAt} 失效，点击后仍需确认。`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#171717"><p style="color:#666;font-size:12px">TECH SYNERGY LAB / APPROVAL GATE</p><h1 style="font-size:26px">${escapeHtml(usageRequest.type === "material" ? "材料使用申请" : "资金使用申请")}</h1><table style="width:100%;border-collapse:collapse;margin:24px 0"><tr><td style="padding:8px;border-bottom:1px solid #ddd;color:#666">申请人</td><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(usageRequest.memberName)}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd;color:#666">部门</td><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(departmentName)}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd;color:#666">材料/账户</td><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(usageRequest.targetName)}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd;color:#666">数量/金额</td><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(value)}</td></tr><tr><td style="padding:8px;border-bottom:1px solid #ddd;color:#666">用途</td><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(usageRequest.purpose)}</td></tr></table><p><a href="${approveUrl}" style="display:inline-block;padding:14px 24px;margin-right:8px;background:#181818;color:#fff;text-decoration:none">批准申请</a><a href="${rejectUrl}" style="display:inline-block;padding:14px 24px;background:#eee;color:#181818;text-decoration:none">拒绝申请</a></p><p style="margin-top:24px;color:#777;font-size:12px">链接绑定审批人 ${escapeHtml(admin.displayName)}，仅可使用一次，有效期至 ${escapeHtml(expiresAt)}。点击链接不会直接审批，仍需在确认页确认。</p></div>`;
+    await mailer.sendMail({ from: mailFrom(), replyTo: mailConfig.replyTo || mailConfig.email, to: admin.email, subject, text, html });
+  }));
+  deliveries.forEach((delivery) => { if (delivery.status === "rejected") console.error("Approval email failed", delivery.reason?.message || delivery.reason); });
+  return deliveries.some((delivery) => delivery.status === "fulfilled");
+}
+
+async function processUsageDecision({ requestId, decision, reviewNote, adminUser, rawEmailToken = "" }) {
+  return withResourceLock(async () => {
+    const requests = readJson(usageRequestFile);
+    const tokenRecords = readJson(emailApprovalTokenFile);
+    let usageRequest;
+    let tokenRecord = null;
+    let effectiveAdmin = adminUser;
+    let effectiveDecision = decision;
+    if (rawEmailToken) {
+      const resolved = resolveEmailApprovalToken(rawEmailToken, tokenRecords, requests, readJson(adminFile));
+      if (resolved.error) return resolved;
+      tokenRecord = resolved.tokenRecord;
+      usageRequest = resolved.usageRequest;
+      effectiveAdmin = resolved.adminUser;
+      effectiveDecision = tokenRecord.action;
+    } else {
+      usageRequest = requests.find((entry) => entry.id === requestId);
+      if (!usageRequest || !canAccessDepartment(effectiveAdmin, usageRequestDepartmentId(usageRequest))) return { status: 404, error: "申请不存在" };
+    }
+    if (!['approved', 'rejected'].includes(effectiveDecision)) return { status: 400, error: "审批结果无效" };
+    if (usageRequest.status !== "pending") return { status: 409, error: "该申请已处理，不能重复审批" };
+    if (effectiveDecision === "approved" && usageRequest.type === "material") {
+      const inventory = readJson(inventoryFile);
+      const item = inventory.find((entry) => entry.id === usageRequest.targetId && entry.status === "active");
+      if (!item || item.quantity < usageRequest.quantity) return { status: 409, error: "当前库存不足，无法批准" };
+      item.quantity -= usageRequest.quantity;
+      item.updatedAt = new Date().toISOString();
+      await writeJson(inventoryFile, inventory);
+      const ledger = readJson(inventoryLedgerFile);
+      ledger.unshift({ id: `MATLOG-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, itemId: item.id, itemName: item.name, direction: "out", quantity: usageRequest.quantity, unit: item.unit, reason: usageRequest.purpose, requestId: usageRequest.id, memberId: usageRequest.memberId, actor: effectiveAdmin, createdAt: new Date().toISOString() });
+      await writeJson(inventoryLedgerFile, ledger.slice(0, 10000));
+    }
+    if (effectiveDecision === "approved" && usageRequest.type === "fund") {
+      const funds = readJson(fundFile);
+      const account = funds.accounts.find((entry) => entry.id === usageRequest.targetId && entry.status === "active");
+      if (!account || account.balance < usageRequest.amount) return { status: 409, error: "当前资金余额不足，无法批准" };
+      account.balance -= usageRequest.amount;
+      account.updatedAt = new Date().toISOString();
+      funds.ledger.unshift({ id: `FUNDLOG-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, accountId: account.id, accountName: account.name, direction: "out", amount: usageRequest.amount, currency: account.currency, reason: usageRequest.purpose, requestId: usageRequest.id, memberId: usageRequest.memberId, actor: effectiveAdmin, createdAt: new Date().toISOString() });
+      funds.ledger = funds.ledger.slice(0, 10000);
+      await writeJson(fundFile, funds);
+    }
+    const reviewedAt = new Date().toISOString();
+    usageRequest.status = effectiveDecision;
+    usageRequest.reviewNote = cleanString(reviewNote, 500);
+    usageRequest.reviewedBy = effectiveAdmin;
+    usageRequest.reviewedAt = reviewedAt;
+    usageRequest.reviewedVia = rawEmailToken ? "email" : "admin";
+    usageRequest.updatedAt = reviewedAt;
+    await writeJson(usageRequestFile, requests);
+    let tokensChanged = false;
+    tokenRecords.forEach((record) => {
+      if (record.requestId !== usageRequest.id || record.usedAt || record.invalidatedAt) return;
+      tokensChanged = true;
+      if (tokenRecord && record.id === tokenRecord.id) {
+        record.usedAt = reviewedAt;
+        record.usedByAdminId = effectiveAdmin.id;
+      } else {
+        record.invalidatedAt = reviewedAt;
+        record.invalidatedReason = "request-processed";
+      }
+    });
+    if (tokensChanged) await writeJson(emailApprovalTokenFile, tokenRecords);
+    return { usageRequest, adminUser: effectiveAdmin, tokenId: tokenRecord?.id || null, decision: effectiveDecision };
+  });
+}
+
 app.use((request, response, next) => {
   noStore(response);
   if (!sameOrigin(request)) return response.status(403).json({ error: "跨站请求已拒绝" });
@@ -427,8 +593,6 @@ app.get("/api/health", (_request, response) => response.json({ ok: true, mail: B
 app.get("/api/content", (_request, response) => response.json(getPublicContent()));
 
 app.post("/api/applications", async (request, response) => {
-  const ipKey = `application:${request.ip}`;
-  if (rateLimited(ipKey, 3, 10 * 60 * 1000)) return response.status(429).json({ error: "提交过于频繁，请稍后再试" });
   if (cleanString(request.body.website, 100)) return response.status(400).json({ error: "请求无效" });
 
   const content = readJson(contentFile);
@@ -452,9 +616,24 @@ app.post("/api/applications", async (request, response) => {
     return response.status(400).json({ error: "请完整填写姓名、学号、班级、联系方式、部门和申请理由" });
   }
 
+  const applicantKey = crypto.createHash("sha256").update(`${application.studentId.toLowerCase()}|${application.contact.toLowerCase()}|${sessionSecret}`).digest("hex").slice(0, 24);
+  const rateLimit = consumeRateLimits([
+    { key: `application-v2:applicant:${applicantKey}`, limit: 3, interval: 30 * 60 * 1000, scope: "applicant" },
+    { key: `application-v2:network:${request.ip}`, limit: 30, interval: 10 * 60 * 1000, scope: "network" }
+  ]);
+  if (!rateLimit.allowed) {
+    response.set("Retry-After", String(rateLimit.retryAfter));
+    return response.status(429).json({ error: rateLimit.scope === "applicant" ? "该申请人短时间内提交次数较多，请稍后再试" : "当前网络提交较多，请稍后再试", retryAfter: rateLimit.retryAfter });
+  }
+
   const applications = readJson(applicationFile);
   applications.unshift(application);
-  await writeJson(applicationFile, applications.slice(0, 2000));
+  try {
+    await writeJson(applicationFile, applications.slice(0, 2000));
+  } catch (error) {
+    releaseRateLimits(rateLimit.reservations);
+    throw error;
+  }
 
   let notified = false;
   const admins = readJson(adminFile);
@@ -571,7 +750,7 @@ app.post("/api/member/usage-requests", requireMember, async (request, response) 
     await writeJson(usageRequestFile, requests.slice(0, 5000));
   });
   appendAudit(request, { ...request.member, displayName: request.member.name }, "usage.request", usageRequest.id, { type, targetId: target.id, amount });
-  void sendOperationalMail(`[资源审批] ${request.member.name} 提交${type === "material" ? "材料" : "资金"}申请`, `申请编号：${usageRequest.id}\n申请人：${request.member.name}\n对象：${target.name}\n数量/金额：${amount}${type === "material" ? target.unit : ` ${target.currency}`}\n用途：${purpose}`, mailConfig?.recipients || []);
+  void sendUsageApprovalEmails(usageRequest);
   response.status(201).json({ ok: true, request: usageRequest });
 });
 app.delete("/api/member/usage-requests/:id", requireMember, async (request, response) => {
@@ -583,12 +762,63 @@ app.delete("/api/member/usage-requests/:id", requireMember, async (request, resp
     usageRequest.status = "cancelled";
     usageRequest.updatedAt = new Date().toISOString();
     await writeJson(usageRequestFile, requests);
+    const tokenRecords = readJson(emailApprovalTokenFile);
+    let tokensChanged = false;
+    tokenRecords.forEach((record) => {
+      if (record.requestId === usageRequest.id && !record.usedAt && !record.invalidatedAt) {
+        tokensChanged = true;
+        record.invalidatedAt = usageRequest.updatedAt;
+        record.invalidatedReason = "request-cancelled";
+      }
+    });
+    if (tokensChanged) await writeJson(emailApprovalTokenFile, tokenRecords);
     return { usageRequest };
   });
   if (result.error) return response.status(result.status).json({ error: result.error });
   const usageRequest = result.usageRequest;
   appendAudit(request, { ...request.member, displayName: request.member.name }, "usage.cancel", usageRequest.id);
   response.json({ ok: true, request: usageRequest });
+});
+
+app.post("/api/email-approvals/preview", (request, response) => {
+  const rateLimit = consumeRateLimits([{ key: `email-approval-preview:${request.ip}`, limit: 60, interval: 10 * 60 * 1000, scope: "network" }]);
+  if (!rateLimit.allowed) {
+    response.set("Retry-After", String(rateLimit.retryAfter));
+    return response.status(429).json({ error: "请求过于频繁，请稍后再试" });
+  }
+  const resolved = resolveEmailApprovalToken(request.body.token);
+  if (resolved.error) return response.status(resolved.status).json({ error: resolved.error });
+  const departmentName = readJson(contentFile).departments.find((department) => department.id === resolved.usageRequest.departmentId)?.name || resolved.usageRequest.departmentId || "未分配部门";
+  const value = resolved.usageRequest.type === "material" ? `${resolved.usageRequest.quantity} ${resolved.usageRequest.unit}` : `${Number(resolved.usageRequest.amount).toFixed(2)} ${resolved.usageRequest.currency}`;
+  response.json({
+    ok: true,
+    approval: {
+      requestId: resolved.usageRequest.id,
+      type: resolved.usageRequest.type,
+      applicantName: resolved.usageRequest.memberName,
+      departmentName,
+      targetName: resolved.usageRequest.targetName,
+      value,
+      purpose: resolved.usageRequest.purpose,
+      action: resolved.tokenRecord.action,
+      approverName: resolved.adminUser.displayName,
+      expiresAt: resolved.tokenRecord.expiresAt
+    }
+  });
+});
+
+app.post("/api/email-approvals/confirm", async (request, response) => {
+  const rateLimit = consumeRateLimits([{ key: `email-approval-confirm:${request.ip}`, limit: 20, interval: 10 * 60 * 1000, scope: "network" }]);
+  if (!rateLimit.allowed) {
+    response.set("Retry-After", String(rateLimit.retryAfter));
+    return response.status(429).json({ error: "确认请求过于频繁，请稍后再试" });
+  }
+  const reviewNote = cleanString(request.body.reviewNote, 500);
+  const result = await processUsageDecision({ rawEmailToken: request.body.token, reviewNote });
+  if (result.error) return response.status(result.status).json({ error: result.error });
+  appendAudit(request, result.adminUser, `usage.email.${result.decision}`, result.usageRequest.id, { channel: "email", tokenId: result.tokenId, type: result.usageRequest.type, targetId: result.usageRequest.targetId });
+  void sendOperationalMail(`[资源审批结果] ${result.usageRequest.id} ${result.decision === "approved" ? "已批准" : "未批准"}`, `申请：${result.usageRequest.targetName}\n结果：${result.decision === "approved" ? "已批准" : "未批准"}\n审批意见：${reviewNote || "无"}`, [result.usageRequest.memberEmail]);
+  response.json({ ok: true, request: { id: result.usageRequest.id, status: result.usageRequest.status, reviewedAt: result.usageRequest.reviewedAt, reviewedBy: result.adminUser.displayName, reviewedVia: "email" } });
 });
 
 app.post("/api/admin/login", (request, response) => {
@@ -1012,40 +1242,7 @@ app.patch("/api/admin/usage-requests/:id", requireAdmin, requirePanel("usage"), 
   const decision = request.body.decision;
   const reviewNote = cleanString(request.body.reviewNote, 500);
   if (!['approved', 'rejected'].includes(decision)) return response.status(400).json({ error: "审批结果无效" });
-  const result = await withResourceLock(async () => {
-    const requests = readJson(usageRequestFile);
-    const usageRequest = requests.find((entry) => entry.id === request.params.id);
-    if (!usageRequest || !canAccessDepartment(request.adminUser, usageRequestDepartmentId(usageRequest))) return { status: 404, error: "申请不存在" };
-    if (usageRequest.status !== "pending") return { status: 409, error: "该申请已处理，不能重复审批" };
-    if (decision === "approved" && usageRequest.type === "material") {
-      const inventory = readJson(inventoryFile);
-      const item = inventory.find((entry) => entry.id === usageRequest.targetId && entry.status === "active");
-      if (!item || item.quantity < usageRequest.quantity) return { status: 409, error: "当前库存不足，无法批准" };
-      item.quantity -= usageRequest.quantity;
-      item.updatedAt = new Date().toISOString();
-      await writeJson(inventoryFile, inventory);
-      const ledger = readJson(inventoryLedgerFile);
-      ledger.unshift({ id: `MATLOG-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, itemId: item.id, itemName: item.name, direction: "out", quantity: usageRequest.quantity, unit: item.unit, reason: usageRequest.purpose, requestId: usageRequest.id, memberId: usageRequest.memberId, actor: request.adminUser, createdAt: new Date().toISOString() });
-      await writeJson(inventoryLedgerFile, ledger.slice(0, 10000));
-    }
-    if (decision === "approved" && usageRequest.type === "fund") {
-      const funds = readJson(fundFile);
-      const account = funds.accounts.find((entry) => entry.id === usageRequest.targetId && entry.status === "active");
-      if (!account || account.balance < usageRequest.amount) return { status: 409, error: "当前资金余额不足，无法批准" };
-      account.balance -= usageRequest.amount;
-      account.updatedAt = new Date().toISOString();
-      funds.ledger.unshift({ id: `FUNDLOG-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, accountId: account.id, accountName: account.name, direction: "out", amount: usageRequest.amount, currency: account.currency, reason: usageRequest.purpose, requestId: usageRequest.id, memberId: usageRequest.memberId, actor: request.adminUser, createdAt: new Date().toISOString() });
-      funds.ledger = funds.ledger.slice(0, 10000);
-      await writeJson(fundFile, funds);
-    }
-    usageRequest.status = decision;
-    usageRequest.reviewNote = reviewNote;
-    usageRequest.reviewedBy = request.adminUser;
-    usageRequest.reviewedAt = new Date().toISOString();
-    usageRequest.updatedAt = usageRequest.reviewedAt;
-    await writeJson(usageRequestFile, requests);
-    return { usageRequest };
-  });
+  const result = await processUsageDecision({ requestId: request.params.id, decision, reviewNote, adminUser: request.adminUser });
   if (result.error) return response.status(result.status).json({ error: result.error });
   appendAudit(request, request.adminUser, `usage.${decision}`, result.usageRequest.id, { type: result.usageRequest.type, targetId: result.usageRequest.targetId });
   void sendOperationalMail(`[资源审批结果] ${result.usageRequest.id} ${decision === "approved" ? "已批准" : "未批准"}`, `申请：${result.usageRequest.targetName}\n结果：${decision === "approved" ? "已批准" : "未批准"}\n审批意见：${reviewNote || "无"}`, [result.usageRequest.memberEmail]);

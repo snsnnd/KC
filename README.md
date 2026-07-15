@@ -55,6 +55,10 @@
 
 加入申请通知按管理员身份选择具体负责人。普通系统通知仍可配置默认邮箱组，但申请通知不会再通过匿名邮箱字符串识别负责人；未配置时默认通知所有主管理员。
 
+加入申请限流以“学号 + 联系方式”作为申请人标识，每位申请人 30 分钟最多成功提交 3 次；共享出口 IP 仅承担每 10 分钟 30 次的宽松防滥用限制。表单校验失败、服务器写入失败和 `429` 重试不会占用或延长额度。
+
+材料和资金申请会向当前有审批权限且负责该部门的管理员分别发送一次性审批邮件。批准和拒绝链接绑定管理员、申请和动作，24 小时过期；浏览器先打开无登录确认页，只有 POST 确认才执行原子扣减。Token 通过 URL Fragment 传递，服务器仅保存 HMAC 哈希，不进入 Nginx URL 日志。
+
 ## 本地运行
 
 安装并启动 API：
@@ -62,7 +66,7 @@
 ```bash
 cd backend
 npm ci
-ADMIN_PASSWORD='replace-with-a-local-password' SESSION_SECRET='replace-with-a-random-secret' npm start
+ADMIN_PASSWORD='replace-with-a-local-password' SESSION_SECRET='replace-with-a-random-secret' PUBLIC_BASE_URL='http://localhost:8080' npm start
 ```
 
 启动静态页面：
@@ -78,6 +82,7 @@ cd backend
 npm run check
 npm run test:applications
 npm run test:admin-scope
+npm run test:email-approval
 npm run test:permissions
 npm run test:resources
 ```

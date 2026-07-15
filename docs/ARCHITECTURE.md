@@ -20,6 +20,8 @@
 
 申请通知配置保存具体管理员 ID，并在发送时解析其当前邮箱。普通通知邮箱组与申请负责人是两个独立概念，避免仅凭邮箱地址无法确认责任人。
 
+资源使用邮件审批 Token 使用 32 字节随机值，数据目录仅保存基于 `SESSION_SECRET` 的 HMAC-SHA256 哈希。Token 绑定申请、审批管理员和批准/拒绝动作，默认 24 小时过期；预览请求不改变状态，确认请求与后台审批共用资源串行锁，成功后使同申请全部 Token 失效。邮件链接把 Token 放在 URL Fragment 中，避免进入代理访问日志和 Referer。
+
 ## 数据模型
 
 - `content.json`：站点设置、项目、部门和资源。
@@ -29,6 +31,7 @@
 - `inventory.json`、`inventory-ledger.json`：物资与出入库流水。
 - `funds.json`：资金账户与资金流水。
 - `usage-requests.json`：材料和资金使用审批。
+- `email-approval-tokens.json`：一次性邮件审批 Token 哈希及使用状态。
 - `notifications.json`、`audit.json`：通知历史与审计记录。
 
 ## 数据库迁移时机
