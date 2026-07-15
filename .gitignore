@@ -1,0 +1,10 @@
+backend/node_modules/
+backend/data/
+backend/src/data/
+docs/TEST_ACCOUNTS.md
+.env
+.env.*
+!.env.example
+*.log
+.ssh-askpass.sh
+.DS_Store

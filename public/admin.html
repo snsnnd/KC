@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#08080a">
+  <title>TSL Control | 内容管理</title>
+  <link rel="stylesheet" href="assets/css/admin.css?v=7">
+</head>
+<body>
+  <main class="login-shell" id="loginView">
+    <form class="login-panel" id="loginForm">
+      <div class="system-mark"><i></i><span>TSL / CONTROL PLANE</span></div>
+      <p class="kicker">[ AUTHORIZATION REQUIRED ]</p>
+      <h1>内容控制台</h1>
+      <label>管理员账号<input id="adminUsername" type="text" value="admin" autocomplete="username" required></label>
+      <label>管理员密码<input id="adminPassword" type="password" autocomplete="current-password" required></label>
+      <button type="submit">AUTHENTICATE <span>↗</span></button>
+      <p class="form-message" id="loginMessage" role="status"></p>
+      <a href="/">← 返回网站</a>
+    </form>
+  </main>
+
+  <div class="admin-shell" id="adminView" hidden>
+    <header class="admin-header">
+      <a class="admin-brand" href="/"><i></i><span><b>TSL CONTROL</b><small>CONTENT OPERATIONS</small></span></a>
+      <div class="admin-actions"><span id="saveStatus">SYSTEM READY</span><button id="syncButton" type="button" hidden>发现远端更新 / 同步</button><span id="currentUser"></span><a href="/" target="_blank">预览网站 ↗</a><button id="logoutButton" type="button">退出</button></div>
+    </header>
+    <aside class="admin-nav" aria-label="后台导航">
+      <button class="is-active" data-panel="settings" type="button"><span>01</span>基础信息</button>
+      <button data-panel="projects" type="button"><span>02</span>项目内容</button>
+      <button data-panel="departments" type="button"><span>03</span>招新部门</button>
+      <button data-panel="resources" type="button"><span>04</span>资源链接</button>
+      <button data-panel="applications" type="button"><span>05</span>申请收件箱 <i id="applicationBadge">0</i></button>
+      <button data-panel="mail" type="button"><span>06</span>邮件通知</button>
+      <button data-panel="notifications" type="button"><span>07</span>通知中心</button>
+      <button data-panel="uploads" type="button"><span>08</span>媒体上传</button>
+      <button data-panel="members" type="button"><span>09</span>人员管理</button>
+      <button data-panel="managers" data-owner-only type="button"><span>10</span>管理员</button>
+      <button data-panel="audit" type="button"><span>11</span>操作日志</button>
+      <button data-panel="inventory" type="button"><span>12</span>物资库存</button>
+      <button data-panel="funds" type="button"><span>13</span>资金账户</button>
+      <button data-panel="usage" type="button"><span>14</span>使用审批 <i id="usageBadge">0</i></button>
+    </aside>
+    <main class="admin-content">
+      <section class="admin-panel is-active" data-panel-view="settings">
+        <div class="panel-heading"><div><p>// GENERAL PARAMETERS</p><h1>基础信息</h1></div><button class="save-button" type="button">保存更改</button></div>
+        <div class="form-grid" id="settingsEditor"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="projects">
+        <div class="panel-heading"><div><p>// DEPLOYED SYSTEMS</p><h1>项目内容</h1></div><div><button id="addProject" type="button">+ 添加项目</button><button class="save-button" type="button">保存更改</button></div></div>
+        <div class="project-admin-filter"><input id="adminProjectSearch" type="search" placeholder="搜索项目名称、编号、分类或标签"><select id="adminProjectCategory" aria-label="按项目分类筛选"><option value="">全部分类</option></select><output id="adminProjectCount"></output></div>
+        <div class="editor-list" id="projectEditor"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="departments">
+        <div class="panel-heading"><div><p>// RECRUITMENT CHANNELS</p><h1>招新部门</h1></div><div><button id="addDepartment" type="button">+ 添加部门</button><button class="save-button" type="button">保存更改</button></div></div>
+        <div class="editor-list" id="departmentEditor"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="resources">
+        <div class="panel-heading"><div><p>// EXTERNAL ENDPOINTS</p><h1>资源链接</h1></div><div><button id="addResource" type="button">+ 添加资源</button><button class="save-button" type="button">保存更改</button></div></div>
+        <div class="editor-list" id="resourceEditor"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="applications">
+        <div class="panel-heading"><div><p>// INCOMING MEMBERS</p><h1>申请收件箱</h1></div><button id="refreshApplications" type="button">刷新</button></div>
+        <div class="application-list" id="applicationList"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="mail">
+        <div class="panel-heading"><div><p>// QQ SMTP CHANNEL</p><h1>邮件通知</h1></div></div>
+        <div class="upload-panel mail-panel">
+          <p>加入申请始终会保存到后台。配置成功后，系统还会通过 QQ SMTP 将每条新申请同步发送到管理员邮箱。授权码使用 AES-256-GCM 加密后保存在服务器，不会返回浏览器。</p>
+          <div class="mail-state"><span>CHANNEL</span><b id="mailState">NOT CONFIGURED</b><span>ENDPOINT</span><b>smtp.qq.com:465 / TLS</b></div>
+          <label class="field">QQ 邮箱<input id="mailEmail" type="email" value="2152202573@qq.com" autocomplete="email"></label>
+          <label class="field">组织发件名称<input id="mailSenderName" maxlength="80" placeholder="科创中心运营组"></label>
+          <label class="field">回复邮箱<input id="mailReplyTo" type="email" placeholder="回复将发送到该地址"></label>
+          <label class="field">同步收件人（逗号或换行分隔）<textarea id="mailRecipients" placeholder="manager-a@qq.com, manager-b@example.com"></textarea></label>
+          <label class="field">SMTP 授权码<input id="mailAuthCode" type="password" autocomplete="new-password" placeholder="在 QQ 邮箱设置中生成，不是 QQ 密码"></label>
+          <button id="saveMailButton" type="button">VERIFY &amp; SAVE CHANNEL</button>
+          <button id="testMailButton" type="button">SEND TEST MESSAGE</button>
+          <p class="form-message" id="mailMessage" role="status"></p>
+        </div>
+      </section>
+      <section class="admin-panel" data-panel-view="notifications">
+        <div class="panel-heading"><div><p>// TARGETED MAIL DISPATCH</p><h1>通知中心</h1></div></div>
+        <form class="notification-form" id="notificationForm">
+          <label class="field field--wide">通知标题<input name="subject" maxlength="160" required></label>
+          <label class="field field--wide">通知正文<textarea name="message" maxlength="10000" required></textarea></label>
+          <fieldset class="audience-box"><legend>发送对象</legend><label><input name="allMembers" type="checkbox"> 全体有效成员</label><label><input name="includeManagers" type="checkbox"> 全体管理员</label><label><input name="includeDefaultRecipients" type="checkbox" checked> 默认邮件通知组</label></fieldset>
+          <fieldset class="audience-box"><legend>按部门选择</legend><div id="notificationDepartments"></div></fieldset>
+          <fieldset class="audience-box"><legend>按权限选择</legend><input name="permissionKeys" placeholder="resource.basic, project.internal"></fieldset>
+          <fieldset class="audience-box"><legend>指定成员</legend><div class="audience-members" id="notificationMembers"></div></fieldset>
+          <label class="field field--wide">其他邮箱（逗号或换行分隔）<textarea name="customEmails" placeholder="external@example.com"></textarea></label>
+          <div class="notification-summary" id="notificationSummary">等待选择发送对象</div>
+          <button type="submit">SEND NOTIFICATION</button>
+          <p class="form-message" id="notificationMessage" role="status"></p>
+        </form>
+        <div class="section-title-admin"><p>// DISPATCH HISTORY</p><h2>发送历史</h2></div>
+        <div class="notification-history" id="notificationHistory"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="uploads">
+        <div class="panel-heading"><div><p>// MEDIA INGEST</p><h1>媒体上传</h1></div></div>
+        <div class="upload-panel">
+          <p>支持 JPG、PNG、WebP、AVIF、MP4、WebM，单文件最大 100MB。上传后将返回可填入项目 Poster 或 Video 字段的站内地址。</p>
+          <input id="mediaFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm">
+          <button id="uploadButton" type="button">UPLOAD MEDIA</button>
+          <div class="upload-result"><input id="uploadUrl" readonly placeholder="/uploads/..."><button id="copyUploadUrl" type="button">复制</button></div>
+          <p class="form-message" id="uploadMessage" role="status"></p>
+        </div>
+      </section>
+      <section class="admin-panel" data-panel-view="members">
+        <div class="panel-heading"><div><p>// MEMBER DIRECTORY &amp; ACL</p><h1>人员管理</h1></div><a href="/member.html" target="_blank">成员中心 ↗</a></div>
+        <form class="manager-form" id="memberForm" data-owner-only>
+          <label class="field">登录账号<input name="username" pattern="[a-z0-9._-]{3,40}" required></label>
+          <label class="field">姓名<input name="name" required></label>
+          <label class="field">学号<input name="studentId"></label>
+          <label class="field">班级<input name="className"></label>
+          <label class="field">邮箱<input name="email" type="email"></label>
+          <label class="field">联系方式<input name="contact"></label>
+          <label class="field">所属部门<select name="departmentId" id="memberDepartment"></select></label>
+          <label class="field">资源权限（逗号分隔）<input name="permissions" placeholder="resource.basic, project.internal"></label>
+          <label class="field">初始密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+          <button type="submit">CREATE MEMBER</button>
+          <p class="form-message" id="memberMessage" role="status"></p>
+        </form>
+        <div class="manager-list" id="memberList"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="managers" data-owner-only>
+        <div class="panel-heading"><div><p>// ACCESS CONTROL</p><h1>管理员</h1></div></div>
+        <form class="manager-form" id="managerForm">
+          <label class="field">登录账号<input name="username" pattern="[a-z0-9._-]{3,40}" required></label>
+          <label class="field">显示名称<input name="displayName" required></label>
+          <label class="field">邮箱<input name="email" type="email"></label>
+          <label class="field">角色<select name="role"><option value="editor">内容编辑</option><option value="reviewer">申请审核</option><option value="owner">主管理员</option></select></label>
+          <label class="field">初始密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+          <button type="submit">CREATE MANAGER</button>
+          <p class="form-message" id="managerMessage" role="status"></p>
+        </form>
+        <div class="manager-list" id="managerList"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="audit">
+        <div class="panel-heading"><div><p>// IMMUTABLE ACTIVITY FEED</p><h1>操作日志</h1></div><button id="refreshAudit" type="button">刷新</button></div>
+        <div class="audit-list" id="auditList"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="inventory">
+        <div class="panel-heading"><div><p>// MATERIAL INVENTORY</p><h1>物资库存</h1></div></div>
+        <form class="manager-form" id="inventoryForm" data-inventory-edit>
+          <label class="field">材料名称<input name="name" required></label><label class="field">SKU / 编号<input name="sku"></label><label class="field">分类<input name="category"></label><label class="field">单位<input name="unit" placeholder="个 / 米 / 块" required></label><label class="field">初始数量<input name="quantity" type="number" min="0" step="0.01" value="0"></label><label class="field">单位成本<input name="unitCost" type="number" min="0" step="0.01" value="0"></label><label class="field">存放位置<input name="location"></label><label class="field">备注<input name="notes"></label><button type="submit">CREATE MATERIAL</button><p class="form-message" id="inventoryMessage"></p>
+        </form>
+        <div class="inventory-grid" id="inventoryList"></div>
+        <div class="section-title-admin"><p>// MATERIAL LEDGER</p><h2>出入库流水</h2></div><div class="audit-list" id="inventoryLedger"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="funds">
+        <div class="panel-heading"><div><p>// FUND ACCOUNTS</p><h1>资金管理</h1></div></div>
+        <form class="manager-form" id="fundForm" data-owner-only>
+          <label class="field">账户名称<input name="name" required></label><label class="field">币种<input name="currency" value="CNY" required></label><label class="field">初始余额<input name="balance" type="number" min="0" step="0.01" value="0"></label><label class="field">备注<input name="notes"></label><button type="submit">CREATE FUND ACCOUNT</button><p class="form-message" id="fundMessage"></p>
+        </form>
+        <div class="inventory-grid" id="fundList"></div>
+        <div class="section-title-admin"><p>// FINANCIAL LEDGER</p><h2>资金流水</h2></div><div class="audit-list" id="fundLedger"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="usage">
+        <div class="panel-heading"><div><p>// APPROVAL GATE</p><h1>使用审批</h1></div><button id="refreshUsageRequests" type="button">刷新</button></div>
+        <div class="usage-list" id="usageRequestList"></div>
+      </section>
+    </main>
+  </div>
+  <script src="assets/js/admin.js?v=8"></script>
+</body>
+</html>

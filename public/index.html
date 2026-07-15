@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08080a">
+  <meta name="description" content="连接软件、硬件与真实世界的科技创新社团。">
+  <title>科技创新社 | Tech Synergy Lab</title>
+  <link rel="icon" href="assets/favicon.svg?v=9" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/css/home.css?v=9">
+</head>
+<body>
+  <div class="boot-screen">
+    <div class="boot-screen__grid"></div>
+    <div class="boot-screen__panel">
+      <div class="boot-screen__header mono">
+        <span>TSL / COLD BOOT</span>
+        <span>BIOS_REV 02.6</span>
+      </div>
+      <div class="boot-screen__value mono"><span id="bootValue">000</span><small>%</small></div>
+      <div class="boot-screen__track"><span id="bootBar"></span></div>
+      <div class="boot-screen__status mono"><span id="bootStatus">INITIALIZING CORE MODULES</span><span>MEM 64K / OK</span></div>
+      <button class="boot-screen__enter mono" id="enterSite" type="button" disabled>
+        <span>ENTER SYSTEM</span><i>↗</i>
+      </button>
+    </div>
+  </div>
+
+  <div class="webgl-stage" id="webglStage" aria-hidden="true"></div>
+
+  <header class="site-header" id="top">
+    <a class="brand" href="#top" aria-label="科技创新社首页">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M2 2h12v12H2zM18 2h12v4H18zM18 10h12v20H18zM2 18h12v12H2z"/>
+      </svg>
+      <span><strong>TECH SYNERGY</strong><small>科技创新社</small></span>
+    </a>
+    <a class="header-cta" href="/join.html"><i></i> JOIN THE LAB</a>
+    <button class="menu-toggle" aria-label="打开菜单" aria-expanded="false"><span></span><span></span></button>
+  </header>
+
+  <aside class="page-rail mono" aria-label="页面导航">
+    <a href="#home" class="is-active"><span>01</span><i></i></a>
+    <a href="#projects"><span>02</span><i></i></a>
+    <a href="#capabilities"><span>03</span><i></i></a>
+    <a href="#about"><span>04</span><i></i></a>
+    <a href="#process"><span>05</span><i></i></a>
+    <a href="#contact"><span>06</span><i></i></a>
+  </aside>
+
+  <main>
+    <section class="hero" id="home" data-scene="0">
+      <div class="hero__rail mono vertical-label">SYSTEM / ONLINE</div>
+      <div class="hero__content">
+        <div class="eyebrow reveal"><span class="status-dot"></span>[ STATUS: ACTIVE ] <span>2026 / CN</span></div>
+        <h1 class="hero__title" aria-label="让代码拥有身体">
+          <span class="title-line reveal"><span>让代码</span><sup>01</sup></span>
+          <span class="title-line reveal"><span>拥有身体。</span><sup>02</sup></span>
+        </h1>
+        <div class="hero__bottom reveal">
+          <p><span>// MISSION</span>我们是一群把想法焊进电路、写入代码的人。从一个传感器，到一台真正理解环境的机器。</p>
+          <a class="text-link" href="#projects">EXPLORE SYSTEMS <span>↓</span></a>
+        </div>
+      </div>
+      <div class="hero__visual" aria-hidden="true">
+        <div class="schematic-ring schematic-ring--outer"></div>
+        <div class="schematic-ring schematic-ring--inner"></div>
+        <div class="axis axis--x"></div><div class="axis axis--y"></div>
+        <div class="robot-rig">
+          <div class="rig-base"><i></i></div>
+          <div class="rig-arm rig-arm--lower"><span></span></div>
+          <div class="rig-joint rig-joint--elbow"><i></i></div>
+          <div class="rig-arm rig-arm--upper"><span></span></div>
+          <div class="rig-joint rig-joint--wrist"><i></i></div>
+          <div class="rig-gripper"><i></i><i></i></div>
+        </div>
+        <div class="coordinate coordinate--a mono">ARM_03 / CALIBRATED<br>X +031.230 / Y +121.474</div>
+        <div class="coordinate coordinate--b mono">TORQUE 42.6 NM<br>REPEAT ±0.02 MM</div>
+        <div class="visual-label mono">KINEMATIC MODEL<br><b>6-AXIS / REV.C</b></div>
+      </div>
+      <div class="hero__telemetry mono">
+        <span>INPUT <b id="inputValue">24.08</b>V</span>
+        <span>LATENCY <b id="latencyValue">08</b>MS</span>
+        <span>NODES <b>12/12</b></span>
+      </div>
+    </section>
+
+    <section class="projects" id="projects" data-scene="1">
+      <div class="section-heading reveal">
+        <div>
+          <span class="section-index mono">[ 01 / SELECTED SYSTEMS ]</span>
+          <h2>已部署项目</h2>
+        </div>
+        <p>不是概念图。每个项目都经过设计、制造、编程与真实场景测试。</p>
+        <div class="project-controls mono">
+          <button id="projectPrev" type="button" aria-label="上一个项目">←</button>
+          <span id="projectCount">01 / 03</span>
+          <button id="projectNext" type="button" aria-label="下一个项目">→</button>
+        </div>
+      </div>
+      <div class="project-browser reveal" role="search" aria-label="筛选项目">
+        <label class="project-search"><span class="mono">SEARCH</span><input id="projectSearch" type="search" placeholder="搜索名称、分类、标签或编号" autocomplete="off"></label>
+        <div class="project-categories mono" id="projectCategories" aria-label="项目分类"></div>
+        <output class="project-results mono" id="projectResults"></output>
+      </div>
+      <div class="project-list" id="projectList" aria-live="polite" tabindex="0" aria-label="项目横向列表"></div>
+      <div class="project-empty mono" id="projectEmpty" hidden>NO MATCHING SYSTEM / 没有匹配的项目</div>
+    </section>
+
+    <section class="capabilities grid-section" id="capabilities" data-scene="2">
+      <div class="section-heading reveal">
+        <div>
+          <span class="section-index mono">[ 02 / CAPABILITY MATRIX ]</span>
+          <h2>我们的能力栈</h2>
+        </div>
+        <p>从电子设计到云端服务，我们以完整链路解决问题。</p>
+      </div>
+      <div class="capability-grid">
+        <article class="capability reveal">
+          <div class="capability__top mono"><span>CORE / 01</span><span class="status-dot"></span></div>
+          <div class="capability__icon icon-code" aria-hidden="true"><i></i><i></i><i></i></div>
+          <h3>软件系统</h3>
+          <p>Web / App / 嵌入式开发<br>计算机视觉 / AI 模型<br>数据服务 / 自动化工具</p>
+        </article>
+        <article class="capability reveal">
+          <div class="capability__top mono"><span>BODY / 02</span><span class="status-dot status-dot--orange"></span></div>
+          <div class="capability__icon icon-board" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <h3>硬件工程</h3>
+          <p>电路设计 / PCB 制作<br>结构建模 / 3D 打印<br>传感器 / 运动控制</p>
+        </article>
+        <article class="capability reveal">
+          <div class="capability__top mono"><span>LINK / 03</span><span class="status-dot status-dot--white"></span></div>
+          <div class="capability__icon icon-network" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <h3>软硬协同</h3>
+          <p>机器人 / 智能车<br>IoT / 边缘计算<br>数字孪生 / 人机交互</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="manifesto grid-section" id="about" data-scene="3">
+      <div class="section-index mono reveal">[ 00 / MANIFESTO ]</div>
+      <div class="manifesto__text reveal">
+        <p>软件是机器的<span>意志</span>，硬件是机器的<span>身体</span>。</p>
+        <p>我们研究二者如何共同感知、决策，并改变真实世界。</p>
+      </div>
+      <div class="manifesto__note mono reveal">// BUILD BEYOND<br>// THE SCREEN</div>
+    </section>
+
+    <section class="process" id="process" data-scene="4">
+      <div class="section-heading reveal">
+        <div><span class="section-index mono">[ 03 / EXECUTION LOGIC ]</span><h2>如何把想法变成作品</h2></div>
+      </div>
+      <ol class="process-list">
+        <li class="reveal"><span class="mono">01</span><strong>发现问题</strong><p>从真实需求出发，不制造伪命题。</p><i>OBSERVE</i></li>
+        <li class="reveal"><span class="mono">02</span><strong>快速原型</strong><p>用最短路径验证核心假设。</p><i>PROTOTYPE</i></li>
+        <li class="reveal"><span class="mono">03</span><strong>系统集成</strong><p>让机械、电子与软件精准协作。</p><i>INTEGRATE</i></li>
+        <li class="reveal"><span class="mono">04</span><strong>开放共享</strong><p>记录过程，让知识继续生长。</p><i>OPEN SOURCE</i></li>
+      </ol>
+    </section>
+
+    <section class="contact" id="contact" data-scene="5">
+      <div class="contact__scan" aria-hidden="true"></div>
+      <div class="contact__meta mono reveal">[ CHANNEL: OPEN ]<br>NEW MEMBERS / COLLABORATION</div>
+      <h2 class="reveal">下一台机器，<br>由你<span>启动。</span></h2>
+      <div class="contact__actions reveal">
+        <a class="button button--primary" href="/join.html">申请加入 <span>↗</span></a>
+        <a class="button" href="/resources.html">资源中心 <span>↗</span></a>
+      </div>
+      <div class="contact__status mono"><span><i></i>SYSTEM ACCEPTING INPUT</span><span>RESPONSE &lt; 48H</span></div>
+    </section>
+  </main>
+
+  <nav class="mobile-dock mono" aria-label="移动端导航">
+    <a href="#home" class="is-active"><i></i><span>首页</span></a>
+    <a href="#projects"><i></i><span>项目</span></a>
+    <a href="#capabilities"><i></i><span>能力</span></a>
+    <a href="#about"><i></i><span>关于</span></a>
+  </nav>
+  <div class="screen-filter" aria-hidden="true"></div>
+  <div class="orientation-guard"><div><i></i>ROTATE DEVICE<br>请使用竖屏获得最佳系统体验</div></div>
+
+  <footer>
+    <a class="brand brand--footer" href="#top">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M2 2h12v12H2zM18 2h12v4H18zM18 10h12v20H18zM2 18h12v12H2z"/></svg>
+      <span><strong>TECH SYNERGY</strong><small>科技创新社</small></span>
+    </a>
+    <p>让技术不只存在于屏幕之内。</p>
+    <div class="footer__links mono"><a href="#projects">PROJECTS</a><a href="#capabilities">CAPABILITIES</a><a href="#contact">CONTACT</a></div>
+    <div class="footer__copy mono">© <span id="year"></span> TECH SYNERGY LAB<br>DESIGNED FOR THE PHYSICAL WORLD</div>
+  </footer>
+
+  <template id="projectTemplate">
+    <article class="project-card reveal">
+      <div class="project-card__media">
+        <span class="hud-corner hud-corner--tl"></span><span class="hud-corner hud-corner--tr"></span>
+        <span class="hud-corner hud-corner--bl"></span><span class="hud-corner hud-corner--br"></span>
+        <div class="project-card__placeholder" aria-hidden="true"><span></span><i></i><i></i><i></i><b></b></div>
+        <video muted loop playsinline preload="none"></video>
+        <div class="media-scan" aria-hidden="true"></div>
+        <div class="media-crosshair" aria-hidden="true"><i></i></div>
+        <div class="media-hud mono"><span class="media-id"></span><span class="media-category"></span><span class="media-state"><i></i> SYSTEM RENDER</span></div>
+        <button class="play-control" type="button" aria-label="播放项目视频"><span>▶</span></button>
+      </div>
+      <div class="project-card__body">
+        <div class="project-card__number mono"></div>
+        <div class="project-card__main"><span class="project-card__category mono"></span><div class="project-card__tags mono"></div><h3></h3><p></p></div>
+        <div class="project-card__links mono"></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="assets/js/site-data.js?v=9"></script>
+  <script src="assets/js/app.js?v=9"></script>
+</body>
+</html>

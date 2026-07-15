@@ -1,0 +1,19 @@
+{
+  "name": "tech-club-cms",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js",
+    "migrate": "node scripts/migrate-data.mjs",
+    "test:resources": "node tests/resource-approval.test.mjs",
+    "test:applications": "node tests/application-profile.test.mjs",
+    "test:smoke": "node tests/production-smoke.test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^9.0.3"
+  }
+}
