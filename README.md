@@ -51,7 +51,9 @@
 
 物资和资金使用必须由成员提交申请，经主管理员或审核员批准后才会在串行锁中校验并扣减。所有访问、申请、审批、库存和资金操作均写入审计记录。
 
-管理员和成员从统一入口选择身份登录。后台按管理员角色显示可进入的子后台；成员中心由服务端根据资源权限、`material.request` 和 `fund.request` 生成可见模块，未授权资源、库存和资金账户不会返回浏览器。
+管理员和成员从统一入口选择身份登录。只有 `owner` 自动拥有全部后台权限；其他管理员由主管理员显式分配“可管理模块”和“负责部门”，后台不会加载或显示未授权面板，申请、成员、通知和使用审批数据同时按部门过滤。成员中心由服务端根据资源权限、`material.request` 和 `fund.request` 生成可见模块，未授权资源、库存和资金账户不会返回浏览器。
+
+加入申请通知按管理员身份选择具体负责人。普通系统通知仍可配置默认邮箱组，但申请通知不会再通过匿名邮箱字符串识别负责人；未配置时默认通知所有主管理员。
 
 ## 本地运行
 
@@ -75,6 +77,7 @@ python3 -m http.server 8080 --directory public
 cd backend
 npm run check
 npm run test:applications
+npm run test:admin-scope
 npm run test:permissions
 npm run test:resources
 ```

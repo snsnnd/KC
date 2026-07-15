@@ -49,4 +49,17 @@ const members = (await readJson("members.json")).map((member) => {
 });
 if (changedMembers) await writeJson("members.json", members);
 
-console.log(JSON.stringify({ ok: true, changedProjects, changedApplications, changedMembers }));
+let changedAdmins = 0;
+const allDepartmentIds = content.departments.map((department) => department.id);
+const legacyPanels = {
+  editor: ["settings", "projects", "departments", "resources", "applications", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"],
+  reviewer: ["applications", "members", "audit", "inventory", "funds", "usage"]
+};
+const admins = (await readJson("admins.json")).map((admin) => {
+  if (Array.isArray(admin.panelPermissions) && Array.isArray(admin.departmentIds)) return admin;
+  changedAdmins += 1;
+  return { ...admin, panelPermissions: admin.role === "owner" ? [] : (legacyPanels[admin.role] || []), departmentIds: admin.role === "owner" ? [] : allDepartmentIds };
+});
+if (changedAdmins) await writeJson("admins.json", admins);
+
+console.log(JSON.stringify({ ok: true, changedProjects, changedApplications, changedMembers, changedAdmins }));

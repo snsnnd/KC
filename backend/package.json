@@ -10,6 +10,7 @@
     "test:resources": "node tests/resource-approval.test.mjs",
     "test:applications": "node tests/application-profile.test.mjs",
     "test:permissions": "node tests/member-visibility.test.mjs",
+    "test:admin-scope": "node tests/admin-scope.test.mjs",
     "test:smoke": "node tests/production-smoke.test.mjs"
   },
   "dependencies": {

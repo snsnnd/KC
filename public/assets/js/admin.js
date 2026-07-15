@@ -7,9 +7,27 @@
     people: { name: "人员管理", code: "PEOPLE", panels: ["departments", "applications", "members", "managers", "audit"] },
     assets: { name: "资源与资金", code: "ASSETS", panels: ["resources", "inventory", "funds", "usage"] }
   };
+  const assignablePanels = {
+    settings: "基础信息",
+    projects: "项目内容",
+    departments: "招新部门",
+    resources: "资源链接",
+    applications: "申请审核",
+    notifications: "通知中心",
+    uploads: "媒体上传",
+    members: "人员管理",
+    audit: "操作日志",
+    inventory: "物资库存",
+    funds: "资金账户",
+    usage: "使用审批"
+  };
   const loginView = document.querySelector("#loginView");
   const adminView = document.querySelector("#adminView");
   const saveStatus = document.querySelector("#saveStatus");
+
+  function canAccessPanel(panel, user = state.user) {
+    return user?.role === "owner" || (user?.panelPermissions || []).includes(panel);
+  }
 
   async function api(url, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -299,7 +317,7 @@
         }
       });
       controls.appendChild(status);
-      if (state.user?.role === "owner") {
+      if (["owner", "editor"].includes(state.user?.role)) {
         if (!application.memberId) {
           const promote = document.createElement("button");
           promote.type = "button";
@@ -317,13 +335,13 @@
               Object.assign(application, payload.application);
               state.members.push(payload.member);
               renderApplications();
-              renderMembers();
+              if (canAccessPanel("members")) renderMembers();
               setStatus("MEMBER ACCOUNT CREATED");
             } catch (error) { setStatus(error.message, true); }
           });
           controls.appendChild(promote);
         }
-        controls.appendChild(remove);
+        if (state.user.role === "owner") controls.appendChild(remove);
       }
       article.append(identity, contact, motivation, controls);
       list.appendChild(article);
@@ -331,10 +349,10 @@
   }
 
   function renderAllEditors() {
-    renderSettings();
-    renderProjects();
-    renderDepartments();
-    renderResources();
+    if (canAccessPanel("settings")) renderSettings();
+    if (canAccessPanel("projects")) renderProjects();
+    if (canAccessPanel("departments")) renderDepartments();
+    if (canAccessPanel("resources")) renderResources();
   }
 
   function renderMail() {
@@ -348,6 +366,41 @@
     document.querySelector("#mailRecipients").value = (state.mail?.recipients || [state.content.settings.managerEmail].filter(Boolean)).join("\n");
     document.querySelector("#mailAuthCode").placeholder = configured ? "已加密保存，留空可保留当前授权码" : "在 QQ 邮箱设置中生成，不是 QQ 密码";
     document.querySelector("#testMailButton").disabled = !configured;
+    const recipientContainer = document.querySelector("#applicationRecipientManagers");
+    recipientContainer.replaceChildren();
+    const selectedRecipients = new Set(state.mail?.applicationRecipientAdminIds || []);
+    state.managers.filter((manager) => manager.email).forEach((manager) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = manager.id;
+      input.checked = selectedRecipients.has(manager.id);
+      label.append(input, document.createTextNode(`${manager.displayName} / @${manager.username} / ${manager.email}`));
+      recipientContainer.appendChild(label);
+    });
+  }
+
+  function renderAccessChoices(container, options, selectedValues, name, isOwner) {
+    const selected = new Set(selectedValues || []);
+    container.replaceChildren();
+    options.forEach(([value, labelText]) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = name;
+      input.value = value;
+      input.checked = isOwner || selected.has(value);
+      input.disabled = isOwner;
+      label.append(input, document.createTextNode(labelText));
+      container.appendChild(label);
+    });
+  }
+
+  function renderManagerFormAccess() {
+    const form = document.querySelector("#managerForm");
+    const isOwner = form.elements.role.value === "owner";
+    renderAccessChoices(document.querySelector("#managerPanelPermissions"), Object.entries(assignablePanels), [], "panelPermissions", isOwner);
+    renderAccessChoices(document.querySelector("#managerDepartments"), state.content.departments.map((department) => [department.id, department.name]), [], "departmentIds", isOwner);
   }
 
   function renderManagers() {
@@ -374,14 +427,41 @@
       });
       const actions = document.createElement("div");
       actions.className = "manager-card__actions";
+      const accessEditor = document.createElement("div");
+      accessEditor.className = "manager-access-editor";
+      const panelFieldset = document.createElement("fieldset");
+      panelFieldset.className = "manager-access-field";
+      const panelLegend = document.createElement("legend");
+      panelLegend.textContent = "可管理模块";
+      const panelChoices = document.createElement("div");
+      panelChoices.className = "manager-choice-grid";
+      panelFieldset.append(panelLegend, panelChoices);
+      const departmentFieldset = document.createElement("fieldset");
+      departmentFieldset.className = "manager-access-field";
+      const departmentLegend = document.createElement("legend");
+      departmentLegend.textContent = "负责部门";
+      const departmentChoices = document.createElement("div");
+      departmentChoices.className = "manager-choice-grid";
+      departmentFieldset.append(departmentLegend, departmentChoices);
+      accessEditor.append(panelFieldset, departmentFieldset);
+      const renderAccess = () => {
+        const isOwner = role.value === "owner";
+        renderAccessChoices(panelChoices, Object.entries(assignablePanels), manager.panelPermissions, "panelPermissions", isOwner);
+        renderAccessChoices(departmentChoices, state.content.departments.map((department) => [department.id, department.name]), manager.departmentIds, "departmentIds", isOwner);
+      };
+      renderAccess();
+      role.addEventListener("change", renderAccess);
       const save = document.createElement("button");
       save.type = "button";
       save.className = "small-button";
-      save.textContent = "保存角色";
+      save.textContent = "保存管理范围";
       save.addEventListener("click", async () => {
         try {
-          const payload = await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ role: role.value }) });
+          const panelPermissions = [...panelChoices.querySelectorAll("input:checked")].map((input) => input.value);
+          const departmentIds = [...departmentChoices.querySelectorAll("input:checked")].map((input) => input.value);
+          const payload = await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ role: role.value, panelPermissions, departmentIds }) });
           Object.assign(manager, payload.manager);
+          renderAccess();
           setStatus("MANAGER UPDATED");
         } catch (error) { setStatus(error.message, true); role.value = manager.role; }
       });
@@ -413,7 +493,7 @@
         });
         actions.appendChild(remove);
       }
-      article.append(identity, email, role, actions);
+      article.append(identity, email, role, actions, accessEditor);
       list.appendChild(article);
     });
   }
@@ -456,7 +536,7 @@
       access.append(status, permissions);
       const actions = document.createElement("div");
       actions.className = "manager-card__actions";
-      if (state.user.role === "owner") {
+      if (["owner", "editor"].includes(state.user.role)) {
         const save = document.createElement("button");
         save.type = "button";
         save.className = "small-button";
@@ -487,7 +567,8 @@
           try { await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "DELETE", body: "{}" }); state.members = state.members.filter((item) => item.id !== member.id); renderMembers(); }
           catch (error) { setStatus(error.message, true); }
         });
-        actions.append(save, reset, remove);
+        actions.append(save, reset);
+        if (state.user.role === "owner") actions.appendChild(remove);
       }
       article.append(identity, contact, access, actions);
       list.appendChild(article);
@@ -691,7 +772,13 @@
         reject.className = "danger-button";
         reject.textContent = "拒绝";
         const decide = async (decision) => {
-          try { const payload = await api(`/api/admin/usage-requests/${usageRequest.id}`, { method: "PATCH", body: JSON.stringify({ decision, reviewNote: note.value }) }); Object.assign(usageRequest, payload.request); state.inventory = await api("/api/admin/inventory"); state.funds = await api("/api/admin/funds"); renderUsageRequests(); renderInventory(); renderFunds(); }
+          try {
+            const payload = await api(`/api/admin/usage-requests/${usageRequest.id}`, { method: "PATCH", body: JSON.stringify({ decision, reviewNote: note.value }) });
+            Object.assign(usageRequest, payload.request);
+            if (canAccessPanel("inventory")) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
+            if (canAccessPanel("funds")) { state.funds = await api("/api/admin/funds"); renderFunds(); }
+            renderUsageRequests();
+          }
           catch (error) { setStatus(error.message, true); }
         };
         approve.addEventListener("click", () => decide("approved"));
@@ -726,10 +813,12 @@
 
   function applyRoleAccess() {
     const role = state.user.role;
-    document.querySelectorAll("[data-owner-only]").forEach((element) => { element.hidden = role !== "owner"; });
-    document.querySelectorAll("[data-inventory-edit]").forEach((element) => { element.hidden = !["owner", "editor"].includes(role); });
-    const allowedPanels = role === "reviewer" ? new Set(["applications", "members", "audit", "inventory", "funds", "usage"]) : role === "editor" ? new Set(["settings", "projects", "departments", "resources", "applications", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"]) : new Set(Object.values(workspaces).flatMap((workspace) => workspace.panels));
-    document.querySelectorAll("[data-workspace-card]").forEach((card) => { card.hidden = !card.dataset.roles.split(",").includes(role); });
+    document.querySelectorAll("[data-owner-only]").forEach((element) => {
+      element.hidden = role !== "owner";
+      element.querySelectorAll("input,textarea,select,button").forEach((control) => { control.disabled = role !== "owner"; if (role !== "owner" && control.type === "checkbox") control.checked = false; });
+    });
+    document.querySelectorAll("[data-inventory-edit]").forEach((element) => { element.hidden = !canAccessPanel("inventory") || !["owner", "editor"].includes(role); });
+    document.querySelectorAll("[data-workspace-card]").forEach((card) => { card.hidden = !workspaces[card.dataset.workspaceCard].panels.some((panel) => canAccessPanel(panel)); });
     const requestedWorkspace = new URLSearchParams(window.location.search).get("workspace");
     state.workspace = workspaces[requestedWorkspace] ? requestedWorkspace : "home";
     const workspace = workspaces[state.workspace];
@@ -737,10 +826,13 @@
     document.querySelector("#workspaceContext").textContent = workspace ? workspace.name : "SELECT WORKSPACE";
     document.title = workspace ? `${workspace.name} | TSL Control` : "后台工作区 | TSL Control";
     document.querySelectorAll(".admin-nav button[data-panel]").forEach((button) => {
-      button.hidden = !workspace || button.dataset.workspace !== state.workspace || !allowedPanels.has(button.dataset.panel);
+      button.hidden = !workspace || button.dataset.workspace !== state.workspace || !canAccessPanel(button.dataset.panel);
       button.classList.remove("is-active");
     });
-    document.querySelectorAll(".admin-panel").forEach((panel) => panel.classList.remove("is-active"));
+    document.querySelectorAll(".admin-panel").forEach((panel) => {
+      panel.classList.remove("is-active");
+      if (panel.dataset.panelView !== "workspace") panel.hidden = !canAccessPanel(panel.dataset.panelView);
+    });
     if (!workspace) {
       document.querySelector('[data-panel-view="workspace"]').classList.add("is-active");
       return;
@@ -762,7 +854,12 @@
     if (adminView.hidden) return;
     try {
       const sync = await api("/api/admin/sync");
-      if (Number(sync.content.revision || 0) > Number(state.content._meta?.revision || 0)) {
+      if (JSON.stringify(sync.user?.panelPermissions || []) !== JSON.stringify(state.user.panelPermissions || []) || JSON.stringify(sync.user?.departmentIds || []) !== JSON.stringify(state.user.departmentIds || []) || sync.user?.role !== state.user.role) {
+        state.user = sync.user;
+        await loadDashboard();
+        return;
+      }
+      if (sync.content && Number(sync.content.revision || 0) > Number(state.content._meta?.revision || 0)) {
         const button = document.querySelector("#syncButton");
         button.hidden = false;
         button.classList.add("sync-alert");
@@ -770,27 +867,27 @@
       }
       const localNew = state.applications.filter((item) => item.status === "new").length;
       const localApplicationUpdate = state.applications.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if (sync.applications.total !== state.applications.length || sync.applications.new !== localNew || (sync.applications.updatedAt || "") !== localApplicationUpdate) {
+      if (sync.applications && (sync.applications.total !== state.applications.length || sync.applications.new !== localNew || (sync.applications.updatedAt || "") !== localApplicationUpdate)) {
         state.applications = await api("/api/admin/applications");
         renderApplications();
       }
       const localMemberUpdate = state.members.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if (sync.members.total !== state.members.length || (sync.members.updatedAt || "") !== localMemberUpdate) {
+      if (sync.members && (sync.members.total !== state.members.length || (sync.members.updatedAt || "") !== localMemberUpdate)) {
         state.members = await api("/api/admin/members");
-        renderMembers();
-        renderNotifications();
+        if (canAccessPanel("members")) renderMembers();
+        if (canAccessPanel("notifications")) renderNotifications();
       }
       if (sync.notifications && (sync.notifications.latestAt || "") !== (state.notifications[0]?.sentAt || "") && ["owner", "editor"].includes(state.user.role)) {
         state.notifications = await api("/api/admin/notifications?limit=100");
         renderNotificationHistory();
       }
       const localInventoryUpdate = state.inventory.items.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if ((sync.inventory?.updatedAt || "") !== localInventoryUpdate) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
+      if (sync.inventory && (sync.inventory.updatedAt || "") !== localInventoryUpdate) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
       const localFundUpdate = state.funds.accounts.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if ((sync.funds?.updatedAt || "") !== localFundUpdate) { state.funds = await api("/api/admin/funds"); renderFunds(); }
+      if (sync.funds && (sync.funds.updatedAt || "") !== localFundUpdate) { state.funds = await api("/api/admin/funds"); renderFunds(); }
       const localUsageUpdate = state.usageRequests.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
       if (sync.usageRequests && (sync.usageRequests.total !== state.usageRequests.length || (sync.usageRequests.updatedAt || "") !== localUsageUpdate)) { state.usageRequests = await api("/api/admin/usage-requests"); renderUsageRequests(); }
-      if (sync.audit.latestId && sync.audit.latestId !== state.audit[0]?.id) {
+      if (sync.audit?.latestId && sync.audit.latestId !== state.audit[0]?.id) {
         state.audit = await api("/api/admin/audit?limit=200");
         renderAudit();
       }
@@ -801,19 +898,18 @@
 
   async function loadDashboard() {
     const isOwner = state.user?.role === "owner";
-    const canEditContent = ["owner", "editor"].includes(state.user?.role);
     const [content, applications, mail, audit, managers, members, resourceSecrets, notifications, inventory, funds, usageRequests] = await Promise.all([
       api("/api/admin/content"),
-      api("/api/admin/applications"),
-      api("/api/admin/mail"),
-      api("/api/admin/audit?limit=200"),
+      canAccessPanel("applications") ? api("/api/admin/applications") : Promise.resolve([]),
+      canAccessPanel("mail") ? api("/api/admin/mail") : Promise.resolve(null),
+      canAccessPanel("audit") ? api("/api/admin/audit?limit=200") : Promise.resolve([]),
       isOwner ? api("/api/admin/managers") : Promise.resolve([]),
-      api("/api/admin/members"),
-      canEditContent ? api("/api/admin/resource-secrets") : Promise.resolve({}),
-      canEditContent ? api("/api/admin/notifications?limit=100") : Promise.resolve([]),
-      api("/api/admin/inventory"),
-      api("/api/admin/funds"),
-      api("/api/admin/usage-requests")
+      canAccessPanel("members") || canAccessPanel("notifications") ? api("/api/admin/members") : Promise.resolve([]),
+      canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? api("/api/admin/resource-secrets") : Promise.resolve({}),
+      canAccessPanel("notifications") ? api("/api/admin/notifications?limit=100") : Promise.resolve([]),
+      canAccessPanel("inventory") ? api("/api/admin/inventory") : Promise.resolve({ items: [], ledger: [] }),
+      canAccessPanel("funds") ? api("/api/admin/funds") : Promise.resolve({ accounts: [], ledger: [] }),
+      canAccessPanel("usage") ? api("/api/admin/usage-requests") : Promise.resolve([])
     ]);
     state.content = content;
     state.applications = applications;
@@ -827,15 +923,15 @@
     state.funds = funds;
     state.usageRequests = usageRequests;
     renderAllEditors();
-    renderApplications();
-    renderMail();
-    renderManagers();
-    renderMembers();
-    renderNotifications();
-    renderInventory();
-    renderFunds();
-    renderUsageRequests();
-    renderAudit();
+    if (canAccessPanel("applications")) renderApplications();
+    if (canAccessPanel("mail")) renderMail();
+    if (isOwner) { renderManagers(); renderManagerFormAccess(); }
+    if (canAccessPanel("members")) renderMembers();
+    if (canAccessPanel("notifications")) renderNotifications();
+    if (canAccessPanel("inventory")) renderInventory();
+    if (canAccessPanel("funds")) renderFunds();
+    if (canAccessPanel("usage")) renderUsageRequests();
+    if (canAccessPanel("audit")) renderAudit();
     applyRoleAccess();
     loginView.hidden = true;
     adminView.hidden = false;
@@ -883,13 +979,17 @@
     event.preventDefault();
     const form = event.currentTarget;
     const message = document.querySelector("#managerMessage");
-    const values = Object.fromEntries(new FormData(form).entries());
+    const formData = new FormData(form);
+    const values = Object.fromEntries(formData.entries());
+    values.panelPermissions = formData.getAll("panelPermissions");
+    values.departmentIds = formData.getAll("departmentIds");
     message.textContent = "CREATING MANAGER...";
     try {
       const payload = await api("/api/admin/managers", { method: "POST", body: JSON.stringify(values) });
       state.managers.push(payload.manager);
       renderManagers();
       form.reset();
+      renderManagerFormAccess();
       message.textContent = "MANAGER CREATED";
     } catch (error) { message.textContent = error.message; }
   });
@@ -987,7 +1087,8 @@
           authCode: document.querySelector("#mailAuthCode").value,
           senderName: document.querySelector("#mailSenderName").value,
           replyTo: document.querySelector("#mailReplyTo").value,
-          recipients: document.querySelector("#mailRecipients").value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean)
+          recipients: document.querySelector("#mailRecipients").value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean),
+          applicationRecipientAdminIds: [...document.querySelectorAll("#applicationRecipientManagers input:checked")].map((input) => input.value)
         })
       });
       document.querySelector("#mailAuthCode").value = "";
@@ -1014,6 +1115,8 @@
       button.disabled = false;
     }
   });
+
+  document.querySelector('#managerForm select[name="role"]').addEventListener("change", renderManagerFormAccess);
 
   api("/api/admin/session").then(async (payload) => { state.csrf = payload.csrf; state.user = payload.user; await loadDashboard(); }).catch(() => {});
 })();

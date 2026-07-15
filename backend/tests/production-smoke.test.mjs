@@ -29,13 +29,16 @@ const login = await json("/api/admin/login", {
   body: JSON.stringify({ username, password })
 });
 assert.equal(login.body.user.role, "owner");
+assert.ok(login.body.user.panelPermissions.includes("managers"));
 const cookie = login.response.headers.getSetCookie()[0].split(";", 1)[0];
 
-await Promise.all([
+const [, , , , mail] = await Promise.all([
   json("/api/admin/content", { headers: { cookie } }),
   json("/api/admin/applications", { headers: { cookie } }),
   json("/api/admin/inventory", { headers: { cookie } }),
-  json("/api/admin/funds", { headers: { cookie } })
+  json("/api/admin/funds", { headers: { cookie } }),
+  json("/api/admin/mail", { headers: { cookie } })
 ]);
+assert.ok(mail.body.applicationRecipientAdminIds.length > 0);
 
 console.log(JSON.stringify({ ok: true, mail: health.body.mail, projects: content.body.projects.length, adminRole: login.body.user.role }));

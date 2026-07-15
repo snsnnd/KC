@@ -26,6 +26,8 @@ const usageRequestFile = path.join(dataDirectory, "usage-requests.json");
 const adminPassword = process.env.ADMIN_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const secureCookies = process.env.COOKIE_SECURE === "true";
+const adminPanelKeys = ["settings", "projects", "departments", "resources", "applications", "mail", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"];
+const assignableAdminPanelKeySet = new Set(adminPanelKeys.filter((panel) => panel !== "mail"));
 
 fs.mkdirSync(uploadDirectory, { recursive: true });
 if (!fs.existsSync(contentFile)) fs.copyFileSync(path.join(backendDirectory, "config", "default-content.json"), contentFile);
@@ -155,7 +157,16 @@ function passwordHash(password, salt) {
   return crypto.scryptSync(String(password), salt, 64).toString("hex");
 }
 
-function createAdminRecord({ username, displayName, email, role = "editor", password }) {
+function normalizeAdminPanelPermissions(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => cleanString(value, 40)).filter((value) => assignableAdminPanelKeySet.has(value)))];
+}
+
+function normalizeAdminDepartmentIds(values) {
+  const validIds = new Set(readJson(contentFile).departments.map((department) => department.id));
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => cleanString(value, 50)).filter((value) => validIds.has(value)))];
+}
+
+function createAdminRecord({ username, displayName, email, role = "editor", panelPermissions = [], departmentIds = [], password }) {
   const salt = crypto.randomBytes(16).toString("hex");
   return {
     id: `ADM-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
@@ -163,6 +174,8 @@ function createAdminRecord({ username, displayName, email, role = "editor", pass
     displayName: cleanString(displayName, 60),
     email: cleanString(email, 120).toLowerCase(),
     role,
+    panelPermissions: normalizeAdminPanelPermissions(panelPermissions),
+    departmentIds: normalizeAdminDepartmentIds(departmentIds),
     salt,
     passwordHash: passwordHash(password, salt),
     createdAt: new Date().toISOString()
@@ -176,7 +189,18 @@ function verifyAdminPassword(admin, password) {
 }
 
 function publicAdmin(admin) {
-  return { id: admin.id, username: admin.username, displayName: admin.displayName, email: admin.email, role: admin.role, createdAt: admin.createdAt };
+  const isOwner = admin.role === "owner";
+  return {
+    id: admin.id,
+    username: admin.username,
+    displayName: admin.displayName,
+    email: admin.email,
+    role: admin.role,
+    panelPermissions: isOwner ? [...adminPanelKeys, "managers"] : normalizeAdminPanelPermissions(admin.panelPermissions),
+    departmentIds: isOwner ? readJson(contentFile).departments.map((department) => department.id) : normalizeAdminDepartmentIds(admin.departmentIds),
+    createdAt: admin.createdAt,
+    updatedAt: admin.updatedAt
+  };
 }
 
 function createMemberRecord({ username, name, studentId, className, email, contact, departmentId, permissions = [], password }) {
@@ -266,6 +290,27 @@ function requireAdmin(request, response, next) {
 
 function requireRole(...roles) {
   return (request, response, next) => roles.includes(request.adminUser.role) ? next() : response.status(403).json({ error: "当前账号没有执行此操作的权限" });
+}
+
+function hasAdminPanel(admin, panel) {
+  return admin.role === "owner" || admin.panelPermissions.includes(panel);
+}
+
+function requirePanel(...panels) {
+  return (request, response, next) => panels.some((panel) => hasAdminPanel(request.adminUser, panel)) ? next() : response.status(403).json({ error: "当前账号没有执行此操作的权限" });
+}
+
+function canAccessDepartment(admin, departmentId) {
+  return admin.role === "owner" || (departmentId && admin.departmentIds.includes(departmentId));
+}
+
+function filterByDepartment(admin, records) {
+  return admin.role === "owner" ? records : records.filter((record) => canAccessDepartment(admin, record.departmentId));
+}
+
+function usageRequestDepartmentId(usageRequest) {
+  if (usageRequest.departmentId) return usageRequest.departmentId;
+  return readJson(memberFile).find((member) => member.id === usageRequest.memberId)?.departmentId || "";
 }
 
 function requireMember(request, response, next) {
@@ -412,8 +457,10 @@ app.post("/api/applications", async (request, response) => {
   await writeJson(applicationFile, applications.slice(0, 2000));
 
   let notified = false;
-  const managerEmail = content.settings.managerEmail || process.env.MANAGER_EMAIL;
-  const notificationRecipients = mailConfig?.recipients?.length ? mailConfig.recipients : [managerEmail].filter(Boolean);
+  const admins = readJson(adminFile);
+  const configuredApplicationRecipients = Array.isArray(mailConfig?.applicationRecipientAdminIds) ? new Set(mailConfig.applicationRecipientAdminIds) : null;
+  const applicationManagers = configuredApplicationRecipients?.size ? admins.filter((admin) => configuredApplicationRecipients.has(admin.id) && admin.email) : admins.filter((admin) => admin.role === "owner" && admin.email);
+  const notificationRecipients = [...new Set(applicationManagers.map((admin) => admin.email.toLowerCase()))];
   if (mailer && notificationRecipients.length) {
     try {
       await mailer.sendMail({
@@ -507,6 +554,7 @@ app.post("/api/member/usage-requests", requireMember, async (request, response) 
     memberId: request.member.id,
     memberName: request.member.name,
     memberEmail: request.member.email,
+    departmentId: request.member.departmentId,
     targetId: target.id,
     targetName: target.name,
     quantity: type === "material" ? amount : undefined,
@@ -568,20 +616,38 @@ app.post("/api/admin/logout", requireAdmin, (request, response) => {
   response.setHeader("Set-Cookie", "tech_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
   response.json({ ok: true });
 });
-app.get("/api/admin/content", requireAdmin, (_request, response) => response.json(readJson(contentFile)));
-app.get("/api/admin/resource-secrets", requireAdmin, requireRole("owner", "editor"), (_request, response) => response.json(resourceSecrets));
-app.put("/api/admin/content", requireAdmin, requireRole("owner", "editor"), async (request, response) => {
+app.get("/api/admin/content", requireAdmin, (request, response) => {
+  const content = readJson(contentFile);
+  response.json({
+    settings: content.settings,
+    projects: hasAdminPanel(request.adminUser, "projects") ? content.projects : [],
+    departments: request.adminUser.role === "owner" ? content.departments : content.departments.filter((department) => canAccessDepartment(request.adminUser, department.id)),
+    resources: hasAdminPanel(request.adminUser, "resources") ? content.resources : [],
+    _meta: content._meta || { revision: 0 }
+  });
+});
+app.get("/api/admin/resource-secrets", requireAdmin, requirePanel("resources"), requireRole("owner", "editor"), (_request, response) => response.json(resourceSecrets));
+app.put("/api/admin/content", requireAdmin, requirePanel("settings", "projects", "departments", "resources"), requireRole("owner", "editor"), async (request, response) => {
   const current = readJson(contentFile);
   const currentRevision = Number(current._meta?.revision || 0);
   const submittedRevision = Number(request.body._meta?.revision || 0);
   if (submittedRevision !== currentRevision) return response.status(409).json({ error: "内容已被其他管理员更新，请同步后重试", latest: current._meta || { revision: currentRevision } });
-  const content = normalizeContent(request.body);
+  const normalized = normalizeContent(request.body);
+  const submittedDepartments = new Map(normalized.departments.map((department) => [department.id, department]));
+  const content = {
+    settings: hasAdminPanel(request.adminUser, "settings") ? normalized.settings : current.settings,
+    projects: hasAdminPanel(request.adminUser, "projects") ? normalized.projects : current.projects,
+    departments: request.adminUser.role === "owner" ? normalized.departments : hasAdminPanel(request.adminUser, "departments") ? current.departments.map((department) => canAccessDepartment(request.adminUser, department.id) && submittedDepartments.has(department.id) ? submittedDepartments.get(department.id) : department) : current.departments,
+    resources: hasAdminPanel(request.adminUser, "resources") ? normalized.resources : current.resources
+  };
   const submittedResources = Array.isArray(request.body.resources) ? request.body.resources : [];
   const nextSecrets = { ...resourceSecrets };
   content.resources.forEach((resource, index) => {
     const submitted = submittedResources[index] || {};
-    if (submitted.clearSecret === true) delete nextSecrets[resource.id];
-    else if (cleanString(submitted.accessSecret, 500)) nextSecrets[resource.id] = cleanString(submitted.accessSecret, 500);
+    if (hasAdminPanel(request.adminUser, "resources")) {
+      if (submitted.clearSecret === true) delete nextSecrets[resource.id];
+      else if (cleanString(submitted.accessSecret, 500)) nextSecrets[resource.id] = cleanString(submitted.accessSecret, 500);
+    }
   });
   const activeResourceIds = new Set(content.resources.map((resource) => resource.id));
   Object.keys(nextSecrets).forEach((id) => { if (!activeResourceIds.has(id)) delete nextSecrets[id]; });
@@ -592,27 +658,32 @@ app.put("/api/admin/content", requireAdmin, requireRole("owner", "editor"), asyn
   appendAudit(request, request.adminUser, "content.update", "site-content", { revision: content._meta.revision });
   response.json({ ok: true, content });
 });
-app.get("/api/admin/mail", requireAdmin, (_request, response) => response.json({
+app.get("/api/admin/mail", requireAdmin, requirePanel("mail"), (_request, response) => response.json({
   configured: Boolean(mailer),
   email: mailConfig?.email || readJson(contentFile).settings.managerEmail || "",
   recipients: mailConfig?.recipients || [readJson(contentFile).settings.managerEmail].filter(Boolean),
   senderName: mailConfig?.senderName || `${readJson(contentFile).settings.clubName || "科技创新社"}运营组`,
   replyTo: mailConfig?.replyTo || mailConfig?.email || "",
+  applicationRecipientAdminIds: Array.isArray(mailConfig?.applicationRecipientAdminIds) ? mailConfig.applicationRecipientAdminIds : readJson(adminFile).filter((admin) => admin.role === "owner" && admin.email).map((admin) => admin.id),
   host: "smtp.qq.com",
   port: 465,
   secure: true
 }));
-app.put("/api/admin/mail", requireAdmin, requireRole("owner"), async (request, response) => {
+app.put("/api/admin/mail", requireAdmin, requirePanel("mail"), requireRole("owner"), async (request, response) => {
   const email = cleanString(request.body.email, 120).toLowerCase();
   const authCode = cleanString(request.body.authCode, 200).replace(/\s+/g, "") || mailConfig?.authCode || "";
   const recipients = [...new Set((Array.isArray(request.body.recipients) ? request.body.recipients : []).map((item) => cleanString(item, 120).toLowerCase()).filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item)))].slice(0, 20);
   const senderName = cleanString(request.body.senderName, 80) || mailConfig?.senderName || `${readJson(contentFile).settings.clubName || "科技创新社"}运营组`;
   const replyTo = cleanString(request.body.replyTo, 120).toLowerCase() || mailConfig?.replyTo || email;
+  const admins = readJson(adminFile);
+  const validApplicationAdminIds = new Set(admins.filter((admin) => admin.email).map((admin) => admin.id));
+  const applicationRecipientAdminIds = [...new Set((Array.isArray(request.body.applicationRecipientAdminIds) ? request.body.applicationRecipientAdminIds : (mailConfig?.applicationRecipientAdminIds || [])).filter((id) => validApplicationAdminIds.has(id)))];
   if (!/^[^\s@]+@qq\.com$/i.test(email)) return response.status(400).json({ error: "请填写有效的 QQ 邮箱" });
   if (!authCode) return response.status(400).json({ error: "请填写 QQ SMTP 授权码" });
   if (!recipients.length) return response.status(400).json({ error: "请至少填写一个通知收件人" });
+  if (!applicationRecipientAdminIds.length) return response.status(400).json({ error: "请至少选择一名申请通知负责人" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo)) return response.status(400).json({ error: "回复邮箱格式无效" });
-  const candidate = { email, authCode, recipients, senderName, replyTo };
+  const candidate = { email, authCode, recipients, senderName, replyTo, applicationRecipientAdminIds };
   const candidateMailer = createMailer(candidate);
   try {
     await candidateMailer.verify();
@@ -628,9 +699,9 @@ app.put("/api/admin/mail", requireAdmin, requireRole("owner"), async (request, r
   content._meta = { revision: Number(content._meta?.revision || 0) + 1, updatedAt: new Date().toISOString(), updatedBy: request.adminUser.displayName };
   await writeJson(contentFile, content);
   appendAudit(request, request.adminUser, "mail.configure", email, { recipientCount: recipients.length });
-  response.json({ ok: true, configured: true, email, recipients, senderName, replyTo, host: "smtp.qq.com", port: 465, secure: true });
+  response.json({ ok: true, configured: true, email, recipients, senderName, replyTo, applicationRecipientAdminIds, host: "smtp.qq.com", port: 465, secure: true });
 });
-app.post("/api/admin/mail/test", requireAdmin, requireRole("owner"), async (request, response) => {
+app.post("/api/admin/mail/test", requireAdmin, requirePanel("mail"), requireRole("owner"), async (request, response) => {
   if (!mailer || !mailConfig) return response.status(400).json({ error: "请先配置 QQ SMTP 授权码" });
   try {
     const info = await mailer.sendMail({
@@ -647,20 +718,25 @@ app.post("/api/admin/mail/test", requireAdmin, requireRole("owner"), async (requ
     response.status(502).json({ error: "测试邮件发送失败，请重新验证授权码" });
   }
 });
-app.get("/api/admin/notifications", requireAdmin, requireRole("owner", "editor"), (request, response) => {
+app.get("/api/admin/notifications", requireAdmin, requirePanel("notifications"), requireRole("owner", "editor"), (request, response) => {
   const limit = Math.max(1, Math.min(Number(request.query.limit) || 100, 300));
-  response.json(readJson(notificationFile).slice(0, limit));
+  const notifications = readJson(notificationFile);
+  response.json((request.adminUser.role === "owner" ? notifications : notifications.filter((item) => item.sentBy?.id === request.adminUser.id)).slice(0, limit));
 });
-app.post("/api/admin/notifications", requireAdmin, requireRole("owner", "editor"), async (request, response) => {
+app.post("/api/admin/notifications", requireAdmin, requirePanel("notifications"), requireRole("owner", "editor"), async (request, response) => {
   if (!mailer || !mailConfig) return response.status(400).json({ error: "请先配置邮件通知通道" });
   const subject = cleanString(request.body.subject, 160);
   const message = cleanString(request.body.message, 10000);
   if (subject.length < 2 || message.length < 2) return response.status(400).json({ error: "请填写通知标题和正文" });
   const audience = request.body.audience || {};
-  const members = readJson(memberFile).filter((member) => member.status === "active" && member.email);
+  const members = filterByDepartment(request.adminUser, readJson(memberFile)).filter((member) => member.status === "active" && member.email);
   const memberIds = new Set(Array.isArray(audience.memberIds) ? audience.memberIds : []);
   const departmentIds = new Set(Array.isArray(audience.departmentIds) ? audience.departmentIds : []);
   const permissionKeys = new Set(Array.isArray(audience.permissionKeys) ? audience.permissionKeys : []);
+  if (request.adminUser.role !== "owner") {
+    if ([...departmentIds].some((departmentId) => !canAccessDepartment(request.adminUser, departmentId)) || [...memberIds].some((memberId) => !members.some((member) => member.id === memberId))) return response.status(400).json({ error: "通知对象超出负责部门范围" });
+    if (audience.includeManagers === true || audience.includeDefaultRecipients === true || (Array.isArray(audience.customEmails) && audience.customEmails.length)) return response.status(403).json({ error: "只有主管理员可以向外部或管理组发送通知" });
+  }
   const emails = new Set();
   members.forEach((member) => {
     const selected = audience.allMembers === true || memberIds.has(member.id) || departmentIds.has(member.departmentId) || (member.permissions || []).some((permission) => permissionKeys.has(permission));
@@ -716,9 +792,12 @@ app.post("/api/admin/managers", requireAdmin, requireRole("owner"), async (reque
   const role = ["owner", "editor", "reviewer"].includes(request.body.role) ? request.body.role : "editor";
   if (!/^[a-z0-9._-]{3,40}$/.test(username)) return response.status(400).json({ error: "账号需为 3-40 位英文、数字、点、横线或下划线" });
   if (password.length < 8) return response.status(400).json({ error: "密码至少需要 8 位" });
+  const panelPermissions = normalizeAdminPanelPermissions(request.body.panelPermissions);
+  const departmentIds = normalizeAdminDepartmentIds(request.body.departmentIds);
+  if (role !== "owner" && (!panelPermissions.length || !departmentIds.length)) return response.status(400).json({ error: "非主管理员必须至少分配一个管理模块和一个负责部门" });
   const admins = readJson(adminFile);
   if (admins.some((item) => item.username === username)) return response.status(409).json({ error: "该管理员账号已存在" });
-  const admin = createAdminRecord({ username, displayName: request.body.displayName || username, email: request.body.email, role, password });
+  const admin = createAdminRecord({ username, displayName: request.body.displayName || username, email: request.body.email, role, panelPermissions, departmentIds, password });
   admins.push(admin);
   await writeJson(adminFile, admins);
   appendAudit(request, request.adminUser, "manager.create", username, { role });
@@ -733,6 +812,11 @@ app.patch("/api/admin/managers/:id", requireAdmin, requireRole("owner"), async (
   admin.displayName = cleanString(request.body.displayName || admin.displayName, 60);
   admin.email = cleanString(request.body.email || admin.email, 120).toLowerCase();
   admin.role = nextRole;
+  const nextPanelPermissions = request.body.panelPermissions === undefined ? normalizeAdminPanelPermissions(admin.panelPermissions) : normalizeAdminPanelPermissions(request.body.panelPermissions);
+  const nextDepartmentIds = request.body.departmentIds === undefined ? normalizeAdminDepartmentIds(admin.departmentIds) : normalizeAdminDepartmentIds(request.body.departmentIds);
+  if (nextRole !== "owner" && (!nextPanelPermissions.length || !nextDepartmentIds.length)) return response.status(400).json({ error: "非主管理员必须至少分配一个管理模块和一个负责部门" });
+  admin.panelPermissions = nextPanelPermissions;
+  admin.departmentIds = nextDepartmentIds;
   if (request.body.password) {
     if (String(request.body.password).length < 8) return response.status(400).json({ error: "密码至少需要 8 位" });
     admin.salt = crypto.randomBytes(16).toString("hex");
@@ -755,12 +839,13 @@ app.delete("/api/admin/managers/:id", requireAdmin, requireRole("owner"), async 
   appendAudit(request, request.adminUser, "manager.delete", admin.username);
   response.json({ ok: true });
 });
-app.get("/api/admin/members", requireAdmin, requireRole("owner", "editor", "reviewer"), (_request, response) => response.json(readJson(memberFile).map(publicMember)));
-app.post("/api/admin/members", requireAdmin, requireRole("owner"), async (request, response) => {
+app.get("/api/admin/members", requireAdmin, requirePanel("members", "notifications"), requireRole("owner", "editor", "reviewer"), (request, response) => response.json(filterByDepartment(request.adminUser, readJson(memberFile)).map(publicMember)));
+app.post("/api/admin/members", requireAdmin, requirePanel("members"), requireRole("owner", "editor"), async (request, response) => {
   const username = cleanString(request.body.username, 40).toLowerCase();
   const password = String(request.body.password || "");
   if (!/^[a-z0-9._-]{3,40}$/.test(username)) return response.status(400).json({ error: "成员账号需为 3-40 位英文、数字、点、横线或下划线" });
   if (password.length < 8) return response.status(400).json({ error: "成员密码至少需要 8 位" });
+  if (!canAccessDepartment(request.adminUser, cleanString(request.body.departmentId, 50))) return response.status(404).json({ error: "负责部门不存在" });
   const members = readJson(memberFile);
   if (members.some((item) => item.username === username)) return response.status(409).json({ error: "该成员账号已存在" });
   const member = createMemberRecord({ ...request.body, username, password, permissions: Array.isArray(request.body.permissions) ? request.body.permissions : [] });
@@ -769,10 +854,11 @@ app.post("/api/admin/members", requireAdmin, requireRole("owner"), async (reques
   appendAudit(request, request.adminUser, "member.create", username, { permissions: member.permissions });
   response.status(201).json({ ok: true, member: publicMember(member) });
 });
-app.patch("/api/admin/members/:id", requireAdmin, requireRole("owner"), async (request, response) => {
+app.patch("/api/admin/members/:id", requireAdmin, requirePanel("members"), requireRole("owner", "editor"), async (request, response) => {
   const members = readJson(memberFile);
   const member = members.find((item) => item.id === request.params.id);
-  if (!member) return response.status(404).json({ error: "成员不存在" });
+  if (!member || !canAccessDepartment(request.adminUser, member.departmentId)) return response.status(404).json({ error: "成员不存在" });
+  if (request.body.departmentId !== undefined && !canAccessDepartment(request.adminUser, cleanString(request.body.departmentId, 50))) return response.status(404).json({ error: "负责部门不存在" });
   if (request.body.name !== undefined) member.name = cleanString(request.body.name, 60);
   if (request.body.studentId !== undefined) member.studentId = cleanString(request.body.studentId, 30);
   if (request.body.className !== undefined) member.className = cleanString(request.body.className, 60);
@@ -792,7 +878,7 @@ app.patch("/api/admin/members/:id", requireAdmin, requireRole("owner"), async (r
   appendAudit(request, request.adminUser, "member.update", member.username, { permissions: member.permissions, status: member.status, passwordChanged: Boolean(request.body.password) });
   response.json({ ok: true, member: publicMember(member) });
 });
-app.delete("/api/admin/members/:id", requireAdmin, requireRole("owner"), async (request, response) => {
+app.delete("/api/admin/members/:id", requireAdmin, requirePanel("members"), requireRole("owner"), async (request, response) => {
   const members = readJson(memberFile);
   const member = members.find((item) => item.id === request.params.id);
   if (!member) return response.status(404).json({ error: "成员不存在" });
@@ -801,10 +887,10 @@ app.delete("/api/admin/members/:id", requireAdmin, requireRole("owner"), async (
   appendAudit(request, request.adminUser, "member.delete", member.username);
   response.json({ ok: true });
 });
-app.post("/api/admin/applications/:id/promote", requireAdmin, requireRole("owner"), async (request, response) => {
+app.post("/api/admin/applications/:id/promote", requireAdmin, requirePanel("applications"), requireRole("owner", "editor"), async (request, response) => {
   const applications = readJson(applicationFile);
   const application = applications.find((item) => item.id === request.params.id);
-  if (!application) return response.status(404).json({ error: "申请不存在" });
+  if (!application || !canAccessDepartment(request.adminUser, application.departmentId)) return response.status(404).json({ error: "申请不存在" });
   const members = readJson(memberFile);
   const username = cleanString(request.body.username, 40).toLowerCase();
   const password = String(request.body.password || "");
@@ -820,8 +906,8 @@ app.post("/api/admin/applications/:id/promote", requireAdmin, requireRole("owner
   appendAudit(request, request.adminUser, "application.promote", application.id, { memberId: member.id, username });
   response.status(201).json({ ok: true, member: publicMember(member), application });
 });
-app.get("/api/admin/inventory", requireAdmin, requireRole("owner", "editor", "reviewer"), (_request, response) => response.json({ items: readJson(inventoryFile), ledger: readJson(inventoryLedgerFile).slice(0, 500) }));
-app.post("/api/admin/inventory", requireAdmin, requireRole("owner", "editor"), async (request, response) => {
+app.get("/api/admin/inventory", requireAdmin, requirePanel("inventory"), requireRole("owner", "editor", "reviewer"), (_request, response) => response.json({ items: readJson(inventoryFile), ledger: readJson(inventoryLedgerFile).slice(0, 500) }));
+app.post("/api/admin/inventory", requireAdmin, requirePanel("inventory"), requireRole("owner", "editor"), async (request, response) => {
   const name = cleanString(request.body.name, 120);
   const unit = cleanString(request.body.unit, 30);
   if (!name || !unit) return response.status(400).json({ error: "请填写材料名称和单位" });
@@ -852,7 +938,7 @@ app.post("/api/admin/inventory", requireAdmin, requireRole("owner", "editor"), a
   appendAudit(request, request.adminUser, "inventory.create", item.id, { quantity: item.quantity, unit: item.unit });
   response.status(201).json({ ok: true, item });
 });
-app.patch("/api/admin/inventory/:id", requireAdmin, requireRole("owner", "editor"), async (request, response) => {
+app.patch("/api/admin/inventory/:id", requireAdmin, requirePanel("inventory"), requireRole("owner", "editor"), async (request, response) => {
   const item = await withResourceLock(async () => {
     const inventory = readJson(inventoryFile);
     const target = inventory.find((entry) => entry.id === request.params.id);
@@ -868,7 +954,7 @@ app.patch("/api/admin/inventory/:id", requireAdmin, requireRole("owner", "editor
   appendAudit(request, request.adminUser, "inventory.update", item.id, { status: item.status });
   response.json({ ok: true, item });
 });
-app.post("/api/admin/inventory/:id/restock", requireAdmin, requireRole("owner", "editor"), async (request, response) => {
+app.post("/api/admin/inventory/:id/restock", requireAdmin, requirePanel("inventory"), requireRole("owner", "editor"), async (request, response) => {
   const quantity = cleanNumber(request.body.quantity, 0, 1_000_000_000);
   const reason = cleanString(request.body.reason, 300);
   if (quantity <= 0 || !reason) return response.status(400).json({ error: "请填写入库数量和原因" });
@@ -888,8 +974,8 @@ app.post("/api/admin/inventory/:id/restock", requireAdmin, requireRole("owner", 
   appendAudit(request, request.adminUser, "inventory.restock", result.id, { quantity, reason });
   response.json({ ok: true, item: result });
 });
-app.get("/api/admin/funds", requireAdmin, requireRole("owner", "editor", "reviewer"), (_request, response) => response.json(readJson(fundFile)));
-app.post("/api/admin/funds", requireAdmin, requireRole("owner"), async (request, response) => {
+app.get("/api/admin/funds", requireAdmin, requirePanel("funds"), requireRole("owner", "editor", "reviewer"), (_request, response) => response.json(readJson(fundFile)));
+app.post("/api/admin/funds", requireAdmin, requirePanel("funds"), requireRole("owner"), async (request, response) => {
   const name = cleanString(request.body.name, 120);
   if (!name) return response.status(400).json({ error: "请填写资金账户名称" });
   const account = { id: `FUND-${crypto.randomBytes(6).toString("hex").toUpperCase()}`, name, currency: cleanString(request.body.currency || "CNY", 10).toUpperCase(), balance: cleanNumber(request.body.balance, 0, 1_000_000_000), notes: cleanString(request.body.notes, 500), status: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
@@ -902,7 +988,7 @@ app.post("/api/admin/funds", requireAdmin, requireRole("owner"), async (request,
   appendAudit(request, request.adminUser, "fund.create", account.id, { balance: account.balance, currency: account.currency });
   response.status(201).json({ ok: true, account });
 });
-app.post("/api/admin/funds/:id/topup", requireAdmin, requireRole("owner"), async (request, response) => {
+app.post("/api/admin/funds/:id/topup", requireAdmin, requirePanel("funds"), requireRole("owner"), async (request, response) => {
   const amount = cleanNumber(request.body.amount, 0, 1_000_000_000);
   const reason = cleanString(request.body.reason, 300);
   if (amount <= 0 || !reason) return response.status(400).json({ error: "请填写入账金额和原因" });
@@ -921,15 +1007,15 @@ app.post("/api/admin/funds/:id/topup", requireAdmin, requireRole("owner"), async
   appendAudit(request, request.adminUser, "fund.topup", account.id, { amount, reason });
   response.json({ ok: true, account });
 });
-app.get("/api/admin/usage-requests", requireAdmin, requireRole("owner", "editor", "reviewer"), (_request, response) => response.json(readJson(usageRequestFile)));
-app.patch("/api/admin/usage-requests/:id", requireAdmin, requireRole("owner", "reviewer"), async (request, response) => {
+app.get("/api/admin/usage-requests", requireAdmin, requirePanel("usage"), requireRole("owner", "editor", "reviewer"), (request, response) => response.json(readJson(usageRequestFile).filter((usageRequest) => canAccessDepartment(request.adminUser, usageRequestDepartmentId(usageRequest)))));
+app.patch("/api/admin/usage-requests/:id", requireAdmin, requirePanel("usage"), requireRole("owner", "reviewer"), async (request, response) => {
   const decision = request.body.decision;
   const reviewNote = cleanString(request.body.reviewNote, 500);
   if (!['approved', 'rejected'].includes(decision)) return response.status(400).json({ error: "审批结果无效" });
   const result = await withResourceLock(async () => {
     const requests = readJson(usageRequestFile);
     const usageRequest = requests.find((entry) => entry.id === request.params.id);
-    if (!usageRequest) return { status: 404, error: "申请不存在" };
+    if (!usageRequest || !canAccessDepartment(request.adminUser, usageRequestDepartmentId(usageRequest))) return { status: 404, error: "申请不存在" };
     if (usageRequest.status !== "pending") return { status: 409, error: "该申请已处理，不能重复审批" };
     if (decision === "approved" && usageRequest.type === "material") {
       const inventory = readJson(inventoryFile);
@@ -965,48 +1051,51 @@ app.patch("/api/admin/usage-requests/:id", requireAdmin, requireRole("owner", "r
   void sendOperationalMail(`[资源审批结果] ${result.usageRequest.id} ${decision === "approved" ? "已批准" : "未批准"}`, `申请：${result.usageRequest.targetName}\n结果：${decision === "approved" ? "已批准" : "未批准"}\n审批意见：${reviewNote || "无"}`, [result.usageRequest.memberEmail]);
   response.json({ ok: true, request: result.usageRequest });
 });
-app.get("/api/admin/audit", requireAdmin, (request, response) => {
+app.get("/api/admin/audit", requireAdmin, requirePanel("audit"), (request, response) => {
   const limit = Math.max(1, Math.min(Number(request.query.limit) || 200, 500));
-  response.json(auditEntries.slice(0, limit));
+  response.json((request.adminUser.role === "owner" ? auditEntries : auditEntries.filter((entry) => entry.actor?.id === request.adminUser.id)).slice(0, limit));
 });
-app.get("/api/admin/sync", requireAdmin, (_request, response) => {
+app.get("/api/admin/sync", requireAdmin, (request, response) => {
   const content = readJson(contentFile);
-  const applications = readJson(applicationFile);
-  const members = readJson(memberFile);
-  const notifications = readJson(notificationFile);
+  const applications = filterByDepartment(request.adminUser, readJson(applicationFile));
+  const members = filterByDepartment(request.adminUser, readJson(memberFile));
+  const notifications = readJson(notificationFile).filter((item) => request.adminUser.role === "owner" || item.sentBy?.id === request.adminUser.id);
   const inventory = readJson(inventoryFile);
   const funds = readJson(fundFile);
-  const usageRequests = readJson(usageRequestFile);
+  const usageRequests = readJson(usageRequestFile).filter((usageRequest) => canAccessDepartment(request.adminUser, usageRequestDepartmentId(usageRequest)));
   const applicationUpdatedAt = applications.reduce((latest, item) => {
     const timestamp = item.updatedAt || item.createdAt || "";
     return timestamp > latest ? timestamp : latest;
   }, "");
-  response.json({
-    content: content._meta || { revision: 0, updatedAt: null, updatedBy: null },
-    applications: { total: applications.length, new: applications.filter((item) => item.status === "new").length, updatedAt: applicationUpdatedAt || null },
-    members: { total: members.length, active: members.filter((item) => item.status === "active").length, updatedAt: members.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null },
-    notifications: { total: notifications.length, latestAt: notifications[0]?.sentAt || null },
-    inventory: { total: inventory.length, updatedAt: inventory.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null },
-    funds: { total: funds.accounts.length, updatedAt: funds.accounts.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null },
-    usageRequests: { total: usageRequests.length, pending: usageRequests.filter((item) => item.status === "pending").length, updatedAt: usageRequests.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null },
-    audit: { latestId: auditEntries[0]?.id || null, latestAt: auditEntries[0]?.timestamp || null }
-  });
+  const result = { user: request.adminUser };
+  if (["settings", "projects", "departments", "resources"].some((panel) => hasAdminPanel(request.adminUser, panel))) result.content = content._meta || { revision: 0, updatedAt: null, updatedBy: null };
+  if (hasAdminPanel(request.adminUser, "applications")) result.applications = { total: applications.length, new: applications.filter((item) => item.status === "new").length, updatedAt: applicationUpdatedAt || null };
+  if (hasAdminPanel(request.adminUser, "members") || hasAdminPanel(request.adminUser, "notifications")) result.members = { total: members.length, active: members.filter((item) => item.status === "active").length, updatedAt: members.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null };
+  if (hasAdminPanel(request.adminUser, "notifications")) result.notifications = { total: notifications.length, latestAt: notifications[0]?.sentAt || null };
+  if (hasAdminPanel(request.adminUser, "inventory")) result.inventory = { total: inventory.length, updatedAt: inventory.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null };
+  if (hasAdminPanel(request.adminUser, "funds")) result.funds = { total: funds.accounts.length, updatedAt: funds.accounts.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null };
+  if (hasAdminPanel(request.adminUser, "usage")) result.usageRequests = { total: usageRequests.length, pending: usageRequests.filter((item) => item.status === "pending").length, updatedAt: usageRequests.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "") || null };
+  if (hasAdminPanel(request.adminUser, "audit")) {
+    const visibleAudit = request.adminUser.role === "owner" ? auditEntries : auditEntries.filter((entry) => entry.actor?.id === request.adminUser.id);
+    result.audit = { latestId: visibleAudit[0]?.id || null, latestAt: visibleAudit[0]?.timestamp || null };
+  }
+  response.json(result);
 });
-app.get("/api/admin/applications", requireAdmin, (_request, response) => response.json(readJson(applicationFile)));
-app.patch("/api/admin/applications/:id", requireAdmin, requireRole("owner", "editor", "reviewer"), async (request, response) => {
+app.get("/api/admin/applications", requireAdmin, requirePanel("applications"), (request, response) => response.json(filterByDepartment(request.adminUser, readJson(applicationFile))));
+app.patch("/api/admin/applications/:id", requireAdmin, requirePanel("applications"), requireRole("owner", "editor", "reviewer"), async (request, response) => {
   const statuses = new Set(["new", "reviewing", "accepted", "rejected"]);
   const status = cleanString(request.body.status, 20);
   if (!statuses.has(status)) return response.status(400).json({ error: "状态无效" });
   const applications = readJson(applicationFile);
   const application = applications.find((item) => item.id === request.params.id);
-  if (!application) return response.status(404).json({ error: "申请不存在" });
+  if (!application || !canAccessDepartment(request.adminUser, application.departmentId)) return response.status(404).json({ error: "申请不存在" });
   application.status = status;
   application.updatedAt = new Date().toISOString();
   await writeJson(applicationFile, applications);
   appendAudit(request, request.adminUser, "application.status", application.id, { status });
   response.json({ ok: true, application });
 });
-app.delete("/api/admin/applications/:id", requireAdmin, requireRole("owner"), async (request, response) => {
+app.delete("/api/admin/applications/:id", requireAdmin, requirePanel("applications"), requireRole("owner"), async (request, response) => {
   const applications = readJson(applicationFile);
   const remaining = applications.filter((item) => item.id !== request.params.id);
   if (remaining.length === applications.length) return response.status(404).json({ error: "申请不存在" });
@@ -1014,7 +1103,7 @@ app.delete("/api/admin/applications/:id", requireAdmin, requireRole("owner"), as
   appendAudit(request, request.adminUser, "application.delete", request.params.id);
   response.json({ ok: true });
 });
-app.post("/api/admin/upload", requireAdmin, requireRole("owner", "editor"), upload.single("file"), (request, response) => {
+app.post("/api/admin/upload", requireAdmin, requirePanel("uploads"), requireRole("owner", "editor"), upload.single("file"), (request, response) => {
   if (!request.file) return response.status(400).json({ error: "请选择 JPG、PNG、WebP、AVIF、MP4 或 WebM 文件" });
   appendAudit(request, request.adminUser, "media.upload", request.file.filename, { bytes: request.file.size, mime: request.file.mimetype });
   response.status(201).json({ ok: true, url: `/uploads/${request.file.filename}` });

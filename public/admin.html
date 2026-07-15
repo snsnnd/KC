@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex,nofollow">
   <meta name="theme-color" content="#08080a">
   <title>TSL Control | 内容管理</title>
-  <link rel="stylesheet" href="assets/css/admin.css?v=8">
+  <link rel="stylesheet" href="assets/css/admin.css?v=9">
 </head>
 <body>
   <main class="login-shell" id="loginView">
@@ -47,11 +47,11 @@
     </aside>
     <main class="admin-content">
       <section class="admin-panel is-active" data-panel-view="workspace">
-        <div class="workspace-hero"><div><p>// CONTROL PLANE DIRECTORY</p><h1>选择子后台</h1></div><span>权限会依据当前管理员角色自动收敛</span></div>
+        <div class="workspace-hero"><div><p>// CONTROL PLANE DIRECTORY</p><h1>选择子后台</h1></div><span>仅显示主管理员分配的管理模块和负责部门</span></div>
         <div class="workspace-grid">
-          <a class="workspace-card" data-workspace-card="operations" data-roles="owner,editor" href="/admin.html?workspace=operations"><span>01 / OPERATIONS</span><h2>运营宣发</h2><p>官网内容、项目展示、媒体上传、邮件通道与定向通知。</p><b>进入运营后台 →</b></a>
-          <a class="workspace-card" data-workspace-card="people" data-roles="owner,editor,reviewer" href="/admin.html?workspace=people"><span>02 / PEOPLE</span><h2>人员管理</h2><p>招新部门、申请审核、成员权限、管理员角色与操作审计。</p><b>进入人员后台 →</b></a>
-          <a class="workspace-card" data-workspace-card="assets" data-roles="owner,editor,reviewer" href="/admin.html?workspace=assets"><span>03 / ASSETS</span><h2>资源与资金</h2><p>受保护资源、物资库存、资金账户和材料资金使用审批。</p><b>进入资源后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="operations" href="/admin.html?workspace=operations"><span>01 / OPERATIONS</span><h2>运营宣发</h2><p>官网内容、项目展示、媒体上传、邮件通道与定向通知。</p><b>进入运营后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="people" href="/admin.html?workspace=people"><span>02 / PEOPLE</span><h2>人员管理</h2><p>招新部门、申请审核、成员权限、管理员角色与操作审计。</p><b>进入人员后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="assets" href="/admin.html?workspace=assets"><span>03 / ASSETS</span><h2>资源与资金</h2><p>受保护资源、物资库存、资金账户和材料资金使用审批。</p><b>进入资源后台 →</b></a>
         </div>
       </section>
       <section class="admin-panel" data-panel-view="settings">
@@ -83,7 +83,8 @@
           <label class="field">QQ 邮箱<input id="mailEmail" type="email" value="2152202573@qq.com" autocomplete="email"></label>
           <label class="field">组织发件名称<input id="mailSenderName" maxlength="80" placeholder="科创中心运营组"></label>
           <label class="field">回复邮箱<input id="mailReplyTo" type="email" placeholder="回复将发送到该地址"></label>
-          <label class="field">同步收件人（逗号或换行分隔）<textarea id="mailRecipients" placeholder="manager-a@qq.com, manager-b@example.com"></textarea></label>
+          <label class="field">默认系统通知邮箱组（逗号或换行分隔）<textarea id="mailRecipients" placeholder="用于普通系统通知，不用于识别申请负责人"></textarea></label>
+          <fieldset class="manager-access-field"><legend>申请通知负责人</legend><p>新申请按管理员身份精确投递，不使用匿名邮箱列表。</p><div class="manager-choice-grid" id="applicationRecipientManagers"></div></fieldset>
           <label class="field">SMTP 授权码<input id="mailAuthCode" type="password" autocomplete="new-password" placeholder="在 QQ 邮箱设置中生成，不是 QQ 密码"></label>
           <button id="saveMailButton" type="button">VERIFY &amp; SAVE CHANNEL</button>
           <button id="testMailButton" type="button">SEND TEST MESSAGE</button>
@@ -95,11 +96,11 @@
         <form class="notification-form" id="notificationForm">
           <label class="field field--wide">通知标题<input name="subject" maxlength="160" required></label>
           <label class="field field--wide">通知正文<textarea name="message" maxlength="10000" required></textarea></label>
-          <fieldset class="audience-box"><legend>发送对象</legend><label><input name="allMembers" type="checkbox"> 全体有效成员</label><label><input name="includeManagers" type="checkbox"> 全体管理员</label><label><input name="includeDefaultRecipients" type="checkbox" checked> 默认邮件通知组</label></fieldset>
+          <fieldset class="audience-box"><legend>发送对象</legend><label><input name="allMembers" type="checkbox"> 负责部门内全体有效成员</label><label data-owner-only><input name="includeManagers" type="checkbox"> 全体管理员</label><label data-owner-only><input name="includeDefaultRecipients" type="checkbox"> 默认邮件通知组</label></fieldset>
           <fieldset class="audience-box"><legend>按部门选择</legend><div id="notificationDepartments"></div></fieldset>
           <fieldset class="audience-box"><legend>按权限选择</legend><input name="permissionKeys" placeholder="resource.basic, project.internal"></fieldset>
           <fieldset class="audience-box"><legend>指定成员</legend><div class="audience-members" id="notificationMembers"></div></fieldset>
-          <label class="field field--wide">其他邮箱（逗号或换行分隔）<textarea name="customEmails" placeholder="external@example.com"></textarea></label>
+          <label class="field field--wide" data-owner-only>其他邮箱（逗号或换行分隔）<textarea name="customEmails" placeholder="external@example.com"></textarea></label>
           <div class="notification-summary" id="notificationSummary">等待选择发送对象</div>
           <button type="submit">SEND NOTIFICATION</button>
           <p class="form-message" id="notificationMessage" role="status"></p>
@@ -119,7 +120,7 @@
       </section>
       <section class="admin-panel" data-panel-view="members">
         <div class="panel-heading"><div><p>// MEMBER DIRECTORY &amp; ACL</p><h1>人员管理</h1></div><a href="/member.html" target="_blank">成员中心 ↗</a></div>
-        <form class="manager-form" id="memberForm" data-owner-only>
+        <form class="manager-form" id="memberForm">
           <label class="field">登录账号<input name="username" pattern="[a-z0-9._-]{3,40}" required></label>
           <label class="field">姓名<input name="name" required></label>
           <label class="field">学号<input name="studentId"></label>
@@ -141,6 +142,8 @@
           <label class="field">显示名称<input name="displayName" required></label>
           <label class="field">邮箱<input name="email" type="email"></label>
           <label class="field">角色<select name="role"><option value="editor">内容编辑</option><option value="reviewer">申请审核</option><option value="owner">主管理员</option></select></label>
+          <fieldset class="manager-access-field"><legend>可管理模块</legend><div class="manager-choice-grid" id="managerPanelPermissions"></div></fieldset>
+          <fieldset class="manager-access-field"><legend>负责部门</legend><div class="manager-choice-grid" id="managerDepartments"></div></fieldset>
           <label class="field">初始密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
           <button type="submit">CREATE MANAGER</button>
           <p class="form-message" id="managerMessage" role="status"></p>
@@ -173,6 +176,6 @@
       </section>
     </main>
   </div>
-  <script src="assets/js/admin.js?v=9"></script>
+  <script src="assets/js/admin.js?v=10"></script>
 </body>
 </html>
