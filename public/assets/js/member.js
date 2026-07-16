@@ -216,7 +216,7 @@
         cancel.textContent = "撤销申请";
         cancel.addEventListener("click", async () => {
           if (!window.confirm("确认撤销这条申请？")) return;
-          try { await api(`/api/member/usage-requests/${request.id}`, { method: "DELETE", body: "{}" }); await renderResourceManagement(await api("/api/member/resource-management")); }
+          try { await api(`/api/member/usage-requests/${request.id}`, { method: "DELETE" }); await renderResourceManagement(await api("/api/member/resource-management")); }
           catch (error) { cancel.textContent = error.message; }
         });
         action.appendChild(cancel);

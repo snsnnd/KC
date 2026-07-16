@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
+import { defaultUsageMailTemplates, defaultApplicationMailTemplates } from "../config/mail-templates.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendDirectory = path.resolve(__dirname, "..");
@@ -73,9 +74,8 @@ function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
+    if (error.code === "ENOENT") return [];
     console.error(`readJson failed for ${file}: ${error.message}`);
-    const text = String(fs.readFileSync(file, "utf8"));
-    if (!text || text === "null") return {};
     return [];
   }
 }
@@ -602,20 +602,6 @@ if (fs.existsSync(mailConfigFile)) {
   mailConfig = { email: process.env.SMTP_USER, authCode: process.env.SMTP_PASS };
 }
 let mailer = createMailer(mailConfig);
-
-const defaultUsageMailTemplates = {
-  approvedSubject: "[申请已批准] {申请编号} {申请对象}",
-  approvedBody: "{申请人}，你好：\n\n你的{申请类型}申请已批准。\n申请编号：{申请编号}\n申请对象：{申请对象}\n数量/金额：{数量金额}\n用途：{用途}\n审批意见：{审批意见}\n审批人：{审批人}\n审批时间：{审批时间}\n",
-  rejectedSubject: "[申请未批准] {申请编号} {申请对象}",
-  rejectedBody: "{申请人}，你好：\n\n你的{申请类型}申请未批准。\n申请编号：{申请编号}\n申请对象：{申请对象}\n数量/金额：{数量金额}\n用途：{用途}\n审批意见：{审批意见}\n审批人：{审批人}\n审批时间：{审批时间}\n"
-};
-
-const defaultApplicationMailTemplates = {
-  acceptedSubject: "[加入申请已通过] {申请编号} {部门}",
-  acceptedBody: "{申请人}，你好：\n\n你的加入申请已通过审核。\n申请编号：{申请编号}\n申请部门：{部门}\n审批意见：{审批意见}\n审批人：{审批人}\n审批时间：{审批时间}\n\n后续账号开通信息将另行发送。\n",
-  rejectedSubject: "[加入申请未通过] {申请编号} {部门}",
-  rejectedBody: "{申请人}，你好：\n\n你的加入申请本次未通过审核。\n申请编号：{申请编号}\n申请部门：{部门}\n审批意见：{审批意见}\n审批人：{审批人}\n审批时间：{审批时间}\n"
-};
 
 async function sendOperationalMail(subject, text, recipients) {
   const addresses = [...new Set((recipients || []).filter(Boolean).map((email) => String(email).toLowerCase()))];

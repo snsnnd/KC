@@ -1,0 +1,12 @@
+User-agent: *
+Disallow: /admin.html
+Disallow: /member.html
+Disallow: /portal.html
+Disallow: /activate.html
+Disallow: /email-approval.html
+Disallow: /bug-report.html
+Disallow: /api/
+Allow: /api/content
+Allow: /api/health
+Allow: /api/bug-report
+Allow: /$

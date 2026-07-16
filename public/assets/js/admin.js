@@ -371,7 +371,7 @@
       remove.addEventListener("click", async () => {
         if (!window.confirm(`确认删除 ${application.name} 的申请？`)) return;
         try {
-          await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "DELETE", body: "{}" });
+          await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "DELETE" });
           state.applications = state.applications.filter((item) => item.id !== application.id);
           renderApplications();
         } catch (error) {
@@ -641,7 +641,7 @@
         remove.addEventListener("click", async () => {
           if (!window.confirm(`确认删除管理员 ${manager.username}？`)) return;
           try {
-             await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "DELETE", body: "{}" });
+             await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "DELETE" });
              state.managers = state.managers.filter((item) => item.id !== manager.id);
              renderManagers();
              renderManagerFormAccess();
@@ -727,7 +727,7 @@
         remove.textContent = "删除";
         remove.addEventListener("click", async () => {
           if (!window.confirm(`确认删除成员 ${member.name}？`)) return;
-          try { await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "DELETE", body: "{}" }); state.members = state.members.filter((item) => item.id !== member.id); renderMembers(); }
+          try { await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "DELETE" }); state.members = state.members.filter((item) => item.id !== member.id); renderMembers(); }
           catch (error) { setStatus(error.message, true); }
         });
         actions.append(save, credentialAction);
@@ -951,7 +951,7 @@
           remove.addEventListener("click", async () => {
             if (!window.confirm(`确认删除材料“${item.name}”？剩余 ${item.quantity} ${item.unit} 将记为库存核销，历史流水会保留。`)) return;
             try {
-              await api(`/api/admin/inventory/${item.id}`, { method: "DELETE", body: "{}" });
+              await api(`/api/admin/inventory/${item.id}`, { method: "DELETE" });
               state.inventory = await api("/api/admin/inventory");
               renderInventory();
               setStatus("MATERIAL DELETED / LEDGER PRESERVED");
@@ -1018,7 +1018,7 @@
         remove.addEventListener("click", async () => {
           if (!window.confirm(`确认删除资金账户“${account.name}”？剩余 ${Number(account.balance).toFixed(2)} ${account.currency} 将记为余额核销，历史流水会保留。`)) return;
           try {
-            await api(`/api/admin/funds/${account.id}`, { method: "DELETE", body: "{}" });
+            await api(`/api/admin/funds/${account.id}`, { method: "DELETE" });
             state.funds = await api("/api/admin/funds");
             renderFunds();
             setStatus("FUND ACCOUNT DELETED / LEDGER PRESERVED");

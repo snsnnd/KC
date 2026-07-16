@@ -184,11 +184,11 @@ try {
   inventory = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
   assert.equal(inventory.body.items.find((item) => item.id === material.body.item.id).quantity, 7);
 
-  const blockedDelete = await jsonRequest(`/api/admin/inventory/${material.body.item.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  const blockedDelete = await jsonRequest(`/api/admin/inventory/${material.body.item.id}`, { method: "DELETE", headers: adminHeaders });
   assert.equal(blockedDelete.response.status, 409);
   const disposable = await jsonRequest("/api/admin/inventory", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "待删除测试材料", unit: "件", quantity: 2 }) });
   assert.equal(disposable.response.status, 201);
-  const deleted = await jsonRequest(`/api/admin/inventory/${disposable.body.item.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  const deleted = await jsonRequest(`/api/admin/inventory/${disposable.body.item.id}`, { method: "DELETE", headers: adminHeaders });
   assert.equal(deleted.response.status, 200);
   inventory = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
   assert.equal(inventory.body.items.some((item) => item.id === disposable.body.item.id), false);
@@ -196,11 +196,11 @@ try {
 
   const pendingFundRequest = await jsonRequest("/api/member/usage-requests", { method: "POST", headers: memberHeaders, body: JSON.stringify({ type: "fund", targetId: fund.body.account.id, amount: 20, purpose: "验证待审批资金阻止删除" }) });
   assert.equal(pendingFundRequest.response.status, 201);
-  const blockedFundDelete = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  const blockedFundDelete = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "DELETE", headers: adminHeaders });
   assert.equal(blockedFundDelete.response.status, 409);
   const disposableFund = await jsonRequest("/api/admin/funds", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "待删除测试资金", currency: "CNY", balance: 50 }) });
   assert.equal(disposableFund.response.status, 201);
-  const deletedFund = await jsonRequest(`/api/admin/funds/${disposableFund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  const deletedFund = await jsonRequest(`/api/admin/funds/${disposableFund.body.account.id}`, { method: "DELETE", headers: adminHeaders });
   assert.equal(deletedFund.response.status, 200);
   funds = await jsonRequest("/api/admin/funds", { headers: { cookie: adminCookie } });
   assert.equal(funds.body.accounts.some((account) => account.id === disposableFund.body.account.id), false);
@@ -210,9 +210,33 @@ try {
   assert.equal(raceFund.response.status, 201);
   const [racingRequest, racingDelete] = await Promise.all([
     jsonRequest("/api/member/usage-requests", { method: "POST", headers: memberHeaders, body: JSON.stringify({ type: "fund", targetId: raceFund.body.account.id, amount: 5, purpose: "并发申请与删除原子性验证" }) }),
-    jsonRequest(`/api/admin/funds/${raceFund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" })
+    jsonRequest(`/api/admin/funds/${raceFund.body.account.id}`, { method: "DELETE", headers: adminHeaders })
   ]);
   assert.ok((racingRequest.response.status === 201 && racingDelete.response.status === 409) || (racingRequest.response.status === 400 && racingDelete.response.status === 200));
+
+  const memberMessageReply = await jsonRequest(`/api/member/messages/${question.body.thread.id}/replies`, { method: "POST", headers: memberHeaders, body: JSON.stringify({ message: "成员二次回复验证完整生命周期" }) });
+  assert.equal(memberMessageReply.response.status, 200);
+  assert.ok(memberMessageReply.body.thread.replies.length >= 3);
+  assert.equal(memberMessageReply.body.thread.replies.at(-1).message, "成员二次回复验证完整生命周期");
+
+  const fundArchiveVisibility = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "archived" }) });
+  assert.equal(fundArchiveVisibility.response.status, 200);
+  const memberFundsAfterArchive = await jsonRequest("/api/member/resource-management", { headers: { cookie: memberCookie } });
+  assert.equal(memberFundsAfterArchive.body.funds.some((account) => account.id === fund.body.account.id), false);
+  await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "active" }) });
+
+  const reactivation = await jsonRequest(`/api/admin/members/${member.body.member.id}/activation-code`, { method: "POST", headers: adminHeaders, body: "{}" });
+  assert.equal(reactivation.response.status, 409, "已激活成员不应重签激活码");
+
+  const bugReport = await jsonRequest("/api/bug-report", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "测试 Bug", description: "这是一条来自自动化测试的 Bug 反馈", contact: "test@example.com" }) });
+  assert.equal(bugReport.response.status, 201);
+  const duplicateBugReport = await jsonRequest("/api/bug-report", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "空", description: "短" }) });
+  assert.equal(duplicateBugReport.response.status, 400);
+  const bugReports = await jsonRequest("/api/admin/bug-reports", { headers: { cookie: adminCookie } });
+  assert.ok(bugReports.body.some((report) => report.id === bugReport.body.report.id));
+  const resolveBug = await jsonRequest(`/api/admin/bug-reports/${bugReport.body.report.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "resolved" }) });
+  assert.equal(resolveBug.response.status, 200);
+  assert.equal(resolveBug.body.report.status, "resolved");
 
   console.log(JSON.stringify({
     ok: true,
@@ -226,6 +250,10 @@ try {
     fundArchiveLifecycle: true,
     fundDeletePreservedLedger: true,
     fundRequestDeleteAtomic: true,
+    memberMessageReplyLifecycle: true,
+    fundArchiveMemberVisibility: true,
+    activationReissueBlocksActivated: true,
+    bugReportCrud: true,
     memberAdminMessaging: true
   }));
 } finally {
