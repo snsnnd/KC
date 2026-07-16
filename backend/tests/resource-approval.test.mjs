@@ -95,7 +95,7 @@ try {
   const memberLogin = await jsonRequest("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: member.body.member.username, password: memberPassword }) });
   assert.equal(memberLogin.response.status, 200);
   const memberCookie = memberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
-  const memberHeaders = { cookie: memberCookie, "content-type": "application/json" };
+  const memberHeaders = { cookie: memberCookie, "content-type": "application/json", "x-csrf-token": memberLogin.body.csrf };
   assert.equal(memberLogin.body.member.mustChangePassword, false);
 
   const question = await jsonRequest("/api/member/messages", { method: "POST", headers: memberHeaders, body: JSON.stringify({ subject: "测试问询", message: "请管理员回复这条测试问题" }) });

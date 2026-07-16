@@ -5,9 +5,13 @@
   const logout = document.querySelector("#memberLogout");
   let member = null;
   let allResources = [];
+  let csrf = null;
 
   async function api(path, options = {}) {
-    const response = await fetch(path, { credentials: "same-origin", ...options, headers: { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) } });
+    const method = (options.method || "GET").toUpperCase();
+    const headers = { ...(options.body ? { "content-type": "application/json" } : {}), ...(options.headers || {}) };
+    if (method !== "GET" && csrf) headers["x-csrf-token"] = csrf;
+    const response = await fetch(path, { credentials: "same-origin", ...options, method, headers });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "请求失败");
     return payload;
@@ -318,6 +322,7 @@
     status.textContent = "AUTHORIZING...";
     try {
       const payload = await api("/api/member/login", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(loginForm).entries())) });
+      csrf = payload.csrf;
       await openDashboard(payload.member);
     } catch (error) { status.textContent = error.message; }
   });
@@ -362,5 +367,5 @@
     } catch (error) { status.textContent = error.message; }
   }
   logout.addEventListener("click", async () => { await api("/api/member/logout", { method: "POST", body: "{}" }); window.location.assign("/portal.html?type=member"); });
-  api("/api/member/session").then((payload) => openDashboard(payload.member)).catch(() => {});
+  api("/api/member/session").then((payload) => { csrf = payload.csrf; return openDashboard(payload.member); }).catch(() => {});
 })();

@@ -41,7 +41,7 @@ async function loginMember(created) {
   const login = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: created.member.username, password: memberPassword }) });
   assert.equal(login.response.status, 200);
   const cookie = login.response.headers.getSetCookie()[0].split(";", 1)[0];
-  return cookie;
+  return { cookie, csrf: login.body.csrf };
 }
 
 try {
@@ -99,7 +99,7 @@ try {
     createdMembers.push(created.body);
   }
 
-  const publicCookie = await loginMember(createdMembers[0]);
+  const { cookie: publicCookie } = await loginMember(createdMembers[0]);
   const publicResources = await request("/api/member/resources", { headers: { cookie: publicCookie } });
   assert.deepEqual(publicResources.body.map((resource) => resource.id), ["source-index"]);
   const publicManagement = await request("/api/member/resource-management", { headers: { cookie: publicCookie } });
@@ -114,7 +114,7 @@ try {
   const forgedMaterialRequest = await request("/api/member/usage-requests", { method: "POST", headers: { cookie: publicCookie, "content-type": "application/json" }, body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity: 1, purpose: "伪造无权限材料申请" }) });
   assert.equal(forgedMaterialRequest.response.status, 403);
 
-  const materialCookie = await loginMember(createdMembers[1]);
+  const { cookie: materialCookie } = await loginMember(createdMembers[1]);
   const materialResources = await request("/api/member/resources", { headers: { cookie: materialCookie } });
   assert.deepEqual(materialResources.body.map((resource) => resource.id).sort(), ["resource-collection", "source-index", "starter-kit"]);
   const memberCollection = materialResources.body.find((resource) => resource.id === "resource-collection");

@@ -83,11 +83,13 @@ try {
 
   const softwareMemberLogin = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.software.member.username, password: scopedPassword }) });
   const softwareMemberCookie = softwareMemberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
-  const softwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: softwareMemberCookie, "content-type": "application/json" }, body: JSON.stringify({ subject: "软件部问询", message: "软件部管理员应该可以看到" }) });
+  const softwareMemberCsrf = softwareMemberLogin.body.csrf;
+  const softwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: softwareMemberCookie, "content-type": "application/json", "x-csrf-token": softwareMemberCsrf }, body: JSON.stringify({ subject: "软件部问询", message: "软件部管理员应该可以看到" }) });
   assert.equal(softwareQuestion.response.status, 201);
   const hardwareMemberLogin = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.hardware.member.username, password: hardwarePassword }) });
   const hardwareMemberCookie = hardwareMemberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
-  const hardwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: hardwareMemberCookie, "content-type": "application/json" }, body: JSON.stringify({ subject: "硬件部问询", message: "软件部管理员不应该看到" }) });
+  const hardwareMemberCsrf = hardwareMemberLogin.body.csrf;
+  const hardwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: hardwareMemberCookie, "content-type": "application/json", "x-csrf-token": hardwareMemberCsrf }, body: JSON.stringify({ subject: "硬件部问询", message: "软件部管理员不应该看到" }) });
   assert.equal(hardwareQuestion.response.status, 201);
   const scopedMessages = await request("/api/admin/member-messages", { headers: { cookie: scoped.cookie } });
   assert.deepEqual(scopedMessages.body.map((thread) => thread.id), [softwareQuestion.body.thread.id]);

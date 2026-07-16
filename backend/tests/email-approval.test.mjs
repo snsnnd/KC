@@ -46,7 +46,7 @@ async function activateMember(created, nextPassword) {
   const login = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: created.member.username, password: nextPassword }) });
   assert.equal(login.response.status, 200);
   const cookie = login.response.headers.getSetCookie()[0].split(";", 1)[0];
-  return cookie;
+  return { cookie, csrf: login.body.csrf };
 }
 
 function rawToken(fill) {
@@ -78,16 +78,16 @@ try {
   assert.equal(material.response.status, 201);
   assert.equal(fund.response.status, 201);
   assert.equal(member.response.status, 201);
-  const memberCookie = await activateMember(member.body, memberPassword);
+  const { cookie: memberCookie, csrf: memberCsrf } = await activateMember(member.body, memberPassword);
 
   async function submitUsage(quantity, purpose) {
-    const result = await request("/api/member/usage-requests", { method: "POST", headers: { cookie: memberCookie, "content-type": "application/json" }, body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity, purpose }) });
+    const result = await request("/api/member/usage-requests", { method: "POST", headers: { cookie: memberCookie, "content-type": "application/json", "x-csrf-token": memberCsrf }, body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity, purpose }) });
     assert.equal(result.response.status, 201);
     return result.body.request;
   }
 
   async function submitFund(amount, purpose) {
-    const result = await request("/api/member/usage-requests", { method: "POST", headers: { cookie: memberCookie, "content-type": "application/json" }, body: JSON.stringify({ type: "fund", targetId: fund.body.account.id, amount, purpose }) });
+    const result = await request("/api/member/usage-requests", { method: "POST", headers: { cookie: memberCookie, "content-type": "application/json", "x-csrf-token": memberCsrf }, body: JSON.stringify({ type: "fund", targetId: fund.body.account.id, amount, purpose }) });
     assert.equal(result.response.status, 201);
     return result.body.request;
   }

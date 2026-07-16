@@ -62,6 +62,13 @@ let writeQueue = Promise.resolve();
 let resourceOperationQueue = Promise.resolve();
 let auditEntries = readJson(auditFile);
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entries] of rateBuckets) { const keep = entries.filter((time) => now - time < 60 * 60 * 1000); if (keep.length) rateBuckets.set(key, keep); else rateBuckets.delete(key); }
+  for (const [token, session] of sessions) { if (session.expiresAt < now) sessions.delete(token); }
+  for (const [token, session] of memberSessions) { if (session.expiresAt < now) memberSessions.delete(token); }
+}, 5 * 60 * 1000).unref();
+
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
@@ -217,9 +224,9 @@ function parseCookies(request) {
   return Object.fromEntries((request.headers.cookie || "").split(";").map((part) => part.trim().split("=")).filter(([key]) => key));
 }
 
-function sameOrigin(request) {
+function sameOrigin(request, strict = false) {
   const origin = request.get("origin");
-  if (!origin) return true;
+  if (!origin) return !strict || request.get("host")?.startsWith("127.0.0.1") || request.get("host")?.startsWith("localhost");
   try {
     return new URL(origin).host === request.get("host");
   } catch {
@@ -417,6 +424,7 @@ function releaseRateLimits(reservations) {
 }
 
 function requireAdmin(request, response, next) {
+  if (request.method !== "GET" && !sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const token = parseCookies(request).tech_admin;
   const session = token && sessions.get(token);
   if (!session || session.expiresAt < Date.now()) {
@@ -462,6 +470,7 @@ function usageRequestDepartmentId(usageRequest) {
 }
 
 function requireMember(request, response, next) {
+  if (request.method !== "GET" && !sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const token = parseCookies(request).tech_member;
   const session = token && memberSessions.get(token);
   if (!session || session.expiresAt < Date.now()) {
@@ -470,6 +479,7 @@ function requireMember(request, response, next) {
   }
   const member = readJson(memberFile).find((item) => item.id === session.member.id && item.status === "active");
   if (!member) return response.status(403).json({ error: "成员账号已停用" });
+  if (request.method !== "GET" && request.get("x-csrf-token") !== session.csrf) return response.status(403).json({ error: "安全令牌无效" });
   session.expiresAt = Date.now() + 8 * 60 * 60 * 1000;
   session.member = publicMember(member);
   request.memberSession = session;
@@ -1071,11 +1081,19 @@ app.use((request, response, next) => {
   if (!sameOrigin(request)) return response.status(403).json({ error: "跨站请求已拒绝" });
   next();
 });
-
-app.get("/api/health", (_request, response) => response.json({ ok: true, mail: Boolean(mailer) }));
-app.get("/api/content", (_request, response) => response.json(getPublicContent()));
+app.get("/api/health", (request, response) => {
+  const rateLimit = consumeRateLimits([{ key: `health:${request.ip}`, limit: 120, interval: 60 * 1000, scope: "network" }]);
+  if (!rateLimit.allowed) { response.set("Retry-After", String(rateLimit.retryAfter)); return response.status(429).json({ error: "请求过于频繁" }); }
+  response.json({ ok: true, mail: Boolean(mailer) });
+});
+app.get("/api/content", (request, response) => {
+  const rateLimit = consumeRateLimits([{ key: `content:${request.ip}`, limit: 60, interval: 60 * 1000, scope: "network" }]);
+  if (!rateLimit.allowed) { response.set("Retry-After", String(rateLimit.retryAfter)); return response.status(429).json({ error: "请求过于频繁" }); }
+  response.json(getPublicContent());
+});
 
 app.post("/api/applications", async (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   if (cleanString(request.body.website, 100)) return response.status(400).json({ error: "请求无效" });
 
   const content = readJson(contentFile);
@@ -1146,12 +1164,14 @@ app.post("/api/member/login", (request, response) => {
   }
   const token = crypto.randomBytes(32).toString("base64url");
   const user = publicMember(member);
-  memberSessions.set(token, { member: user, expiresAt: Date.now() + 8 * 60 * 60 * 1000 });
+  const csrf = crypto.randomBytes(16).toString("hex");
+  memberSessions.set(token, { member: user, csrf, expiresAt: Date.now() + 8 * 60 * 60 * 1000 });
   response.setHeader("Set-Cookie", `tech_member=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookies ? "; Secure" : ""}`);
   appendAudit(request, { ...user, displayName: user.name }, "member.login", username);
-  response.json({ ok: true, member: user });
+  response.json({ ok: true, member: user, csrf });
 });
 app.post("/api/member/activate", async (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const username = cleanString(request.body.username, 40).toLowerCase();
   const activationCode = cleanString(request.body.activationCode, 20).toUpperCase();
   const nextPassword = String(request.body.nextPassword || "");
@@ -1192,7 +1212,7 @@ app.post("/api/member/activate", async (request, response) => {
   appendAudit(request, { ...publicMember(result.member), displayName: result.member.name }, "member.activate", result.member.username, { activationId: result.activationId });
   response.json({ ok: true, member: publicMember(result.member) });
 });
-app.get("/api/member/session", requireMember, (request, response) => response.json({ ok: true, member: request.member }));
+app.get("/api/member/session", requireMember, (request, response) => response.json({ ok: true, member: request.member, csrf: request.memberSession.csrf }));
 app.post("/api/member/logout", requireMember, (request, response) => {
   const token = parseCookies(request).tech_member;
   appendAudit(request, { ...request.member, displayName: request.member.name }, "member.logout", request.member.username);
@@ -1379,6 +1399,7 @@ app.delete("/api/member/usage-requests/:id", requireMember, async (request, resp
 });
 
 app.post("/api/email-approvals/preview", (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const rateLimit = consumeRateLimits([{ key: `email-approval-preview:${request.ip}`, limit: 60, interval: 10 * 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) {
     response.set("Retry-After", String(rateLimit.retryAfter));
@@ -1406,6 +1427,7 @@ app.post("/api/email-approvals/preview", (request, response) => {
 });
 
 app.post("/api/email-approvals/confirm", async (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const rateLimit = consumeRateLimits([{ key: `email-approval-confirm:${request.ip}`, limit: 20, interval: 10 * 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) {
     response.set("Retry-After", String(rateLimit.retryAfter));
@@ -1421,6 +1443,7 @@ app.post("/api/email-approvals/confirm", async (request, response) => {
 });
 
 app.post("/api/application-email-approvals/preview", (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const rateLimit = consumeRateLimits([{ key: `application-email-preview:${request.ip}`, limit: 60, interval: 10 * 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) {
     response.set("Retry-After", String(rateLimit.retryAfter));
@@ -1447,6 +1470,7 @@ app.post("/api/application-email-approvals/preview", (request, response) => {
 });
 
 app.post("/api/application-email-approvals/confirm", async (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const rateLimit = consumeRateLimits([{ key: `application-email-confirm:${request.ip}`, limit: 20, interval: 10 * 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) {
     response.set("Retry-After", String(rateLimit.retryAfter));
@@ -1462,6 +1486,7 @@ app.post("/api/application-email-approvals/confirm", async (request, response) =
 });
 
 app.post("/api/admin/login", (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const username = cleanString(request.body.username || "admin", 40).toLowerCase();
   if (rateLimited(`login:${request.ip}:${username}`, 5, 15 * 60 * 1000)) return response.status(429).json({ error: "尝试次数过多，请稍后再试" });
   const admin = readJson(adminFile).find((item) => effectiveAdmin(item).username.toLowerCase() === username);
@@ -2233,6 +2258,7 @@ app.post("/api/admin/upload", requireAdmin, requirePanel("uploads"), requireRole
   response.status(201).json({ ok: true, url: `/uploads/${request.file.filename}` });
 });
 app.post("/api/bug-report", async (request, response) => {
+  if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
   const title = cleanString(request.body.title, 120);
   const description = cleanString(request.body.description, 2000);
   const contact = cleanString(request.body.contact, 120);
