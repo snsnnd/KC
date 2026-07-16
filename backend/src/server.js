@@ -50,6 +50,7 @@ if (!fs.existsSync(usageRequestFile)) fs.writeFileSync(usageRequestFile, "[]\n",
 if (!fs.existsSync(emailApprovalTokenFile)) fs.writeFileSync(emailApprovalTokenFile, "[]\n", { mode: 0o600 });
 if (!fs.existsSync(memberActivationCodeFile)) fs.writeFileSync(memberActivationCodeFile, "[]\n", { mode: 0o600 });
 if (!fs.existsSync(memberMessageFile)) fs.writeFileSync(memberMessageFile, "[]\n", { mode: 0o600 });
+if (!fs.existsSync(bugReportFile)) fs.writeFileSync(bugReportFile, "[]\n", { mode: 0o600 });
 
 const app = express();
 app.disable("x-powered-by");
@@ -87,6 +88,7 @@ function writeJson(file, value) {
     await fs.promises.rename(temporaryFile, file);
   });
   run.catch((error) => { console.error(`writeJson failed for ${file}: ${error.message}`); queueError = error; });
+  run.then(() => { queueError = null; });
   writeQueue = run;
   return run;
 }
@@ -543,9 +545,9 @@ function appendAudit(request, user, action, target, details = {}) {
     details,
     source: crypto.createHash("sha256").update(`${request.ip}:${sessionSecret}`).digest("hex").slice(0, 12)
   };
-  auditEntries.unshift(entry);
-  auditEntries = auditEntries.slice(0, 5000);
-  return { entry, persisted: writeJson(auditFile, auditEntries) };
+  auditEntries = [entry, ...auditEntries].slice(0, 5000);
+  const persisted = writeJson(auditFile, auditEntries);
+  return { entry, persisted };
 }
 
 function noStore(response) {
@@ -988,7 +990,7 @@ async function sendUsageApprovalEmails(usageRequest) {
     await writeJson(emailApprovalTokenFile, existing.filter((record) => !record.invalidatedAt || Date.now() - Date.parse(record.invalidatedAt) < 30 * 24 * 60 * 60 * 1000).slice(0, 10000));
   });
   const departmentName = readJson(contentFile).departments.find((department) => department.id === usageRequest.departmentId)?.name || usageRequest.departmentId || "未分配部门";
-  const subject = `[待审批] ${usageRequest.memberName} 的${usageRequest.type === "material" ? "材料" : "资金"}申请 ${usageRequest.id}`;
+  const subject = `[待审批] ${usageRequest.memberName.replace(/[\r\n]+/g, " ")} 的${usageRequest.type === "material" ? "材料" : "资金"}申请 ${usageRequest.id}`;
   const deliveries = await Promise.allSettled(issued.map(async ({ admin, adminUser, approveToken, rejectToken }) => {
     const currentAdmin = readJson(adminFile).find((item) => item.id === admin.id);
     if (!currentAdmin || publicAdmin(currentAdmin).email !== adminUser.email || adminApprovalVersion(currentAdmin) !== adminApprovalVersion(admin) || !isEmailApprover(currentAdmin, usageRequest)) throw new Error("Approval recipient changed before delivery");
@@ -1512,7 +1514,7 @@ app.post("/api/admin/logout", requireAdmin, (request, response) => {
   const token = parseCookies(request).tech_admin;
   appendAudit(request, request.adminUser, "auth.logout", request.adminUser.username);
   sessions.delete(token);
-  response.setHeader("Set-Cookie", "tech_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+  response.setHeader("Set-Cookie", `tech_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookies ? "; Secure" : ""}`);
   response.json({ ok: true });
 });
 app.get("/api/admin/content", requireAdmin, (request, response) => {
@@ -1525,7 +1527,7 @@ app.get("/api/admin/content", requireAdmin, (request, response) => {
     _meta: content._meta || { revision: 0 }
   });
 });
-app.get("/api/admin/resource-secrets", requireAdmin, requirePanel("resources"), requireRole("owner", "editor"), (_request, response) => response.json(resourceSecrets));
+app.post("/api/admin/resource-secrets", requireAdmin, requirePanel("resources"), requireRole("owner", "editor"), (_request, response) => response.json(resourceSecrets));
 app.put("/api/admin/content", requireAdmin, requirePanel("settings", "projects", "departments", "resources"), requireRole("owner", "editor"), async (request, response) => {
   const result = await withResourceLock(async () => {
     const current = readJson(contentFile);

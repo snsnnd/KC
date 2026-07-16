@@ -238,6 +238,16 @@ try {
   assert.equal(resolveBug.response.status, 200);
   assert.equal(resolveBug.body.report.status, "resolved");
 
+  const restock = await jsonRequest(`/api/admin/inventory/${material.body.item.id}/restock`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ quantity: 5, reason: "测试入库验证" }) });
+  assert.equal(restock.response.status, 200);
+  const afterRestock = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
+  assert.equal(afterRestock.body.items.find((item) => item.id === material.body.item.id).quantity, 12);
+
+  const topup = await jsonRequest(`/api/admin/funds/${fund.body.account.id}/topup`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ amount: 300, reason: "测试入账验证" }) });
+  assert.equal(topup.response.status, 200);
+  const afterTopup = await jsonRequest("/api/admin/funds", { headers: { cookie: adminCookie } });
+  assert.equal(afterTopup.body.accounts.find((account) => account.id === fund.body.account.id).balance, 1100);
+
   console.log(JSON.stringify({
     ok: true,
     pendingDidNotDeduct: true,
@@ -254,6 +264,8 @@ try {
     fundArchiveMemberVisibility: true,
     activationReissueBlocksActivated: true,
     bugReportCrud: true,
+    inventoryRestock: true,
+    fundTopup: true,
     memberAdminMessaging: true
   }));
 } finally {

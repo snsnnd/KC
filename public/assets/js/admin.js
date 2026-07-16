@@ -306,7 +306,7 @@
       setStatus("SAVING...");
       const payload = await api("/api/admin/content", { method: "PUT", body: JSON.stringify(collectContent()) });
       state.content = payload.content;
-      state.resourceSecrets = canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? await api("/api/admin/resource-secrets") : {};
+      state.resourceSecrets = canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? await api("/api/admin/resource-secrets", { method: "POST", body: "{}" }) : {};
       renderAllEditors();
       setStatus("SAVED / SYNCED");
     } catch (error) {
@@ -474,7 +474,7 @@
     const status = document.querySelector("#mailState");
     status.textContent = configured ? "ONLINE / VERIFIED" : "NOT CONFIGURED";
     status.classList.toggle("is-online", configured);
-    document.querySelector("#mailEmail").value = state.mail?.email || state.content.settings.managerEmail || "2152202573@qq.com";
+    document.querySelector("#mailEmail").value = state.mail?.email || state.content.settings.managerEmail || "";
     document.querySelector("#mailSenderName").value = state.mail?.senderName || `${state.content.settings.clubName}运营组`;
     document.querySelector("#mailReplyTo").value = state.mail?.replyTo || state.mail?.email || state.content.settings.managerEmail || "";
     document.querySelector("#mailRecipients").value = (state.mail?.recipients || [state.content.settings.managerEmail].filter(Boolean)).join("\n");
@@ -1226,7 +1226,7 @@
       isOwner ? api("/api/admin/managers") : Promise.resolve([]),
       canAccessPanel("members") ? api("/api/admin/members") : Promise.resolve([]),
       canAccessPanel("notifications") ? api("/api/admin/notification-audience") : Promise.resolve({ members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }),
-      canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? api("/api/admin/resource-secrets") : Promise.resolve({}),
+      canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? api("/api/admin/resource-secrets", { method: "POST", body: "{}" }) : Promise.resolve({}),
       canAccessPanel("notifications") ? api("/api/admin/notifications?limit=100") : Promise.resolve([]),
       canAccessPanel("notifications") ? api("/api/admin/member-messages?limit=200") : Promise.resolve([]),
       canAccessPanel("inventory") ? api("/api/admin/inventory") : Promise.resolve({ items: [], ledger: [] }),
