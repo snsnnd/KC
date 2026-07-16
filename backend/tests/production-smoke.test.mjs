@@ -18,7 +18,7 @@ assert.equal(health.body.ok, true);
 const content = await json("/api/content");
 assert.ok(content.body.projects.every((project) => project.category), "a project is missing its category");
 
-for (const path of ["/", "/portal.html", "/activate.html", "/email-approval.html", "/admin.html", "/admin.html?workspace=operations", "/admin.html?workspace=people", "/admin.html?workspace=assets", "/join.html", "/member.html", "/resources.html", "/resource.html?id=source-index", "/assets/css/home.css", "/assets/css/subpage.css", "/assets/js/app.js", "/assets/js/activate.js", "/assets/js/admin.js", "/assets/js/member.js", "/assets/js/resources.js", "/assets/js/portal.js", "/assets/js/email-approval.js"]) {
+for (const path of ["/", "/portal.html", "/activate.html", "/bug-report.html", "/email-approval.html", "/admin.html", "/admin.html?workspace=operations", "/admin.html?workspace=people", "/admin.html?workspace=assets", "/join.html", "/member.html", "/resources.html", "/resource.html?id=source-index", "/assets/css/home.css", "/assets/css/subpage.css", "/assets/js/app.js", "/assets/js/activate.js", "/assets/js/bug-report.js", "/assets/js/admin.js", "/assets/js/member.js", "/assets/js/resources.js", "/assets/js/portal.js", "/assets/js/email-approval.js"]) {
   const response = await fetch(`${base}${path}`);
   assert.equal(response.status, 200, `${path} did not load`);
 }

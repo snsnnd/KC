@@ -26,6 +26,7 @@ const usageRequestFile = path.join(dataDirectory, "usage-requests.json");
 const emailApprovalTokenFile = path.join(dataDirectory, "email-approval-tokens.json");
 const memberActivationCodeFile = path.join(dataDirectory, "member-activation-codes.json");
 const memberMessageFile = path.join(dataDirectory, "member-messages.json");
+const bugReportFile = path.join(dataDirectory, "bug-reports.json");
 const adminPassword = process.env.ADMIN_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const secureCookies = process.env.COOKIE_SECURE === "true";
@@ -2230,6 +2231,41 @@ app.post("/api/admin/upload", requireAdmin, requirePanel("uploads"), requireRole
   if (!request.file) return response.status(400).json({ error: "请选择 JPG、PNG、WebP、AVIF、MP4 或 WebM 文件" });
   appendAudit(request, request.adminUser, "media.upload", request.file.filename, { bytes: request.file.size, mime: request.file.mimetype });
   response.status(201).json({ ok: true, url: `/uploads/${request.file.filename}` });
+});
+app.post("/api/bug-report", async (request, response) => {
+  const title = cleanString(request.body.title, 120);
+  const description = cleanString(request.body.description, 2000);
+  const contact = cleanString(request.body.contact, 120);
+  if (title.length < 3 || description.length < 5) return response.status(400).json({ error: "请填写标题（至少 3 个字符）和详细描述（至少 5 个字符）" });
+  const rateLimit = consumeRateLimits([{ key: `bug-report:${request.ip}`, limit: 5, interval: 60 * 60 * 1000, scope: "network" }]);
+  if (!rateLimit.allowed) {
+    response.set("Retry-After", String(rateLimit.retryAfter));
+    return response.status(429).json({ error: "提交过于频繁，请稍后再试" });
+  }
+  const report = { id: `BUG-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`, title, description, contact, status: "open", createdAt: new Date().toISOString() };
+  await withResourceLock(async () => {
+    const reports = readJson(bugReportFile);
+    reports.unshift(report);
+    await writeJson(bugReportFile, reports.slice(0, 2000));
+  });
+  response.status(201).json({ ok: true, report: { id: report.id, title: report.title, status: report.status, createdAt: report.createdAt } });
+});
+app.get("/api/admin/bug-reports", requireAdmin, (request, response) => {
+  response.json(readJson(bugReportFile));
+});
+app.patch("/api/admin/bug-reports/:id", requireAdmin, async (request, response) => {
+  const result = await withResourceLock(async () => {
+    const reports = readJson(bugReportFile);
+    const report = reports.find((item) => item.id === request.params.id);
+    if (!report) return { status: 404, error: "报告不存在" };
+    if (request.body.status && ["open", "resolved"].includes(request.body.status)) report.status = request.body.status;
+    report.updatedAt = new Date().toISOString();
+    await writeJson(bugReportFile, reports);
+    return { report };
+  });
+  if (result.error) return response.status(result.status).json({ error: result.error });
+  appendAudit(request, request.adminUser, "bug-report.update", result.report.id, { status: result.report.status });
+  response.json({ ok: true, report: result.report });
 });
 
 app.use((error, _request, response, _next) => {

@@ -849,6 +849,43 @@
     if (!state.memberMessages.length) list.textContent = "NO MEMBER QUESTIONS / 暂无成员问询";
   }
 
+  function renderBugReports() {
+    const list = document.querySelector("#bugReportList");
+    list.replaceChildren();
+    (state.bugReports || []).forEach((report) => {
+      const article = document.createElement("article");
+      article.className = "notification-record";
+      const content = document.createElement("div");
+      const title = document.createElement("h3");
+      title.textContent = report.title;
+      const detail = document.createElement("p");
+      detail.textContent = `${report.description}\n${report.contact ? `联系方式：${report.contact}` : "未留联系方式"}`;
+      content.append(title, detail);
+      const actions = document.createElement("div");
+      const meta = document.createElement("code");
+      meta.textContent = `${report.id}\n${new Date(report.createdAt).toLocaleString("zh-CN")}\n${report.status === "open" ? "未处理" : "已解决"}`;
+      if (report.status === "open") {
+        const resolveButton = document.createElement("button");
+        resolveButton.type = "button";
+        resolveButton.className = "small-button";
+        resolveButton.textContent = "标记已解决";
+        resolveButton.addEventListener("click", async () => {
+          try {
+            await api(`/api/admin/bug-reports/${report.id}`, { method: "PATCH", body: JSON.stringify({ status: "resolved" }) });
+            report.status = "resolved";
+            renderBugReports();
+          } catch (error) { setStatus(error.message, true); }
+        });
+        actions.append(meta, resolveButton);
+      } else {
+        actions.appendChild(meta);
+      }
+      article.append(content, actions);
+      list.appendChild(article);
+    });
+    if (!(state.bugReports || []).length) list.textContent = "NO BUG REPORTS / 暂无 Bug 反馈";
+  }
+
   function updateNotificationSummary() {
     const form = document.querySelector("#notificationForm");
     const allMembers = form.elements.allMembers.checked;
@@ -1181,7 +1218,7 @@
 
   async function loadDashboard() {
     const isOwner = state.user?.role === "owner";
-    const [content, applications, mail, audit, managers, members, notificationAudience, resourceSecrets, notifications, memberMessages, inventory, funds, usageRequests] = await Promise.all([
+    const [content, applications, mail, audit, managers, members, notificationAudience, resourceSecrets, notifications, memberMessages, inventory, funds, usageRequests, bugReports] = await Promise.all([
       api("/api/admin/content"),
       canAccessPanel("applications") ? api("/api/admin/applications") : Promise.resolve([]),
       canAccessPanel("mail") ? api("/api/admin/mail") : Promise.resolve(null),
@@ -1194,7 +1231,8 @@
       canAccessPanel("notifications") ? api("/api/admin/member-messages?limit=200") : Promise.resolve([]),
       canAccessPanel("inventory") ? api("/api/admin/inventory") : Promise.resolve({ items: [], ledger: [] }),
       canAccessPanel("funds") ? api("/api/admin/funds") : Promise.resolve({ accounts: [], ledger: [] }),
-      canAccessPanel("usage") ? api("/api/admin/usage-requests") : Promise.resolve([])
+      canAccessPanel("usage") ? api("/api/admin/usage-requests") : Promise.resolve([]),
+      api("/api/admin/bug-reports")
     ]);
     state.content = content;
     state.applications = applications;
@@ -1209,6 +1247,7 @@
     state.inventory = inventory;
     state.funds = funds;
     state.usageRequests = usageRequests;
+    state.bugReports = bugReports;
     renderAllEditors();
     if (canAccessPanel("applications")) renderApplications();
     if (canAccessPanel("mail")) renderMail();
@@ -1219,6 +1258,7 @@
     if (canAccessPanel("funds")) renderFunds();
     if (canAccessPanel("usage")) renderUsageRequests();
     if (canAccessPanel("audit")) renderAudit();
+    renderBugReports();
     applyRoleAccess();
     loginView.hidden = true;
     adminView.hidden = false;

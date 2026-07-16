@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex"><title>Bug 反馈 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=10"></head>
+<body>
+  <header class="sub-header"><a class="sub-brand" href="/"><i></i><span>TECH SYNERGY LAB</span></a><a href="/resources.html">← 资源中心</a></header>
+  <main>
+    <section class="sub-hero"><div><span class="sub-kicker">[ BUG REPORT ]</span><h1>提交 Bug。</h1></div><p>发现页面错乱、功能异常或体验问题？请在此提交，我们会尽快处理。描述越详细，修复越快。</p></section>
+    <section class="sub-content" id="bugReportArea">
+      <form class="application-form" id="bugForm">
+        <label class="form-field form-field--wide">问题标题<input name="title" minlength="3" maxlength="120" required placeholder="例如：登录页按钮点击无反应"></label>
+        <label class="form-field form-field--wide">详细描述<textarea name="description" minlength="5" maxlength="2000" required placeholder="请说明操作步骤、预期行为和实际发生的情况。如能附上截图链接更佳。"></textarea></label>
+        <label class="form-field form-field--wide">联系方式（选填）<input name="contact" maxlength="120" placeholder="QQ / 微信 / 邮箱，方便我们跟进确认"></label>
+        <button class="submit-button" type="submit">SUBMIT BUG REPORT <span>→</span></button>
+        <p class="form-status" id="bugStatus" role="status"></p>
+      </form>
+      <div class="success-panel" id="bugResult" hidden><i></i><h2>反馈已提交</h2><p id="bugResultText"></p><a class="submit-button" href="/">返回首页 <span>→</span></a></div>
+    </section>
+  </main>
+  <script src="assets/js/bug-report.js?v=1"></script>
+</body>
+</html>
