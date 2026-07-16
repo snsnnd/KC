@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const base = process.env.BASE_URL || "https://47.120.0.45";
+const base = process.env.BASE_URL || "https://example.com";
 const username = process.env.SMOKE_ADMIN_USERNAME;
 const password = process.env.SMOKE_ADMIN_PASSWORD;
 assert.ok(username && password, "SMOKE_ADMIN_USERNAME and SMOKE_ADMIN_PASSWORD are required");

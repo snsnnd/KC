@@ -4,10 +4,10 @@
 
 科创中心官网与运营系统是一套面向高校社团的轻量管理平台，涵盖公开官网、成员中心、管理员后台三大模块。系统基于 Node.js + Express 后端，前端为原生 HTML/CSS/JavaScript，数据以 JSON 文件持久化存储。
 
-- **官网**：`https://47.120.0.45`
-- **统一入口**：`https://47.120.0.45/portal.html`
-- **成员中心**：`https://47.120.0.45/member.html`
-- **管理后台**：`https://47.120.0.45/admin.html`
+- **官网**：`https://example.com`
+- **统一入口**：`https://example.com/portal.html`
+- **成员中心**：`https://example.com/member.html`
+- **管理后台**：`https://example.com/admin.html`
 
 ---
 

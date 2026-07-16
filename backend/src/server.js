@@ -52,7 +52,7 @@ if (!fs.existsSync(memberMessageFile)) fs.writeFileSync(memberMessageFile, "[]\n
 
 const app = express();
 app.disable("x-powered-by");
-app.set("trust proxy", "loopback");
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS) || 1);
 app.use(express.json({ limit: "1mb" }));
 
 const sessions = new Map();
@@ -67,7 +67,7 @@ setInterval(() => {
   for (const [key, entries] of rateBuckets) { const keep = entries.filter((time) => now - time < 60 * 60 * 1000); if (keep.length) rateBuckets.set(key, keep); else rateBuckets.delete(key); }
   for (const [token, session] of sessions) { if (session.expiresAt < now) sessions.delete(token); }
   for (const [token, session] of memberSessions) { if (session.expiresAt < now) memberSessions.delete(token); }
-}, 5 * 60 * 1000).unref();
+}, 60 * 1000).unref();
 
 function readJson(file) {
   try {
@@ -535,7 +535,7 @@ function publicResourceNode(resource, ancestorProtected = false) {
 
 function appendAudit(request, user, action, target, details = {}) {
   const entry = {
-    id: `LOG-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,
+    id: `LOG-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
     timestamp: new Date().toISOString(),
     actor: user ? { id: user.id || "", username: user.username || "", displayName: user.displayName || user.username || "" } : null,
     action,
@@ -575,9 +575,9 @@ const upload = multer({
 function createMailer(config) {
   if (!config?.email || !config?.authCode) return null;
   return nodemailer.createTransport({
-    host: "smtp.qq.com",
-    port: 465,
-    secure: true,
+    host: process.env.SMTP_HOST || "smtp.qq.com",
+    port: Number(process.env.SMTP_PORT) || 465,
+    secure: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) === 465 : true,
     auth: { user: config.email, pass: config.authCode },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
@@ -2110,7 +2110,7 @@ app.post("/api/admin/funds", requireAdmin, requirePanel("funds"), requireRole("o
   appendAudit(request, request.adminUser, "fund.create", account.id, { balance: account.balance, currency: account.currency });
   response.status(201).json({ ok: true, account });
 });
-app.patch("/api/admin/funds/:id", requireAdmin, requirePanel("funds"), requireRole("owner"), async (request, response) => {
+app.patch("/api/admin/funds/:id", requireAdmin, requirePanel("funds"), requireRole("owner"), /* 资金变更限 owner：涉及真实财务流水，不可委托 editor */ async (request, response) => {
   const account = await withResourceLock(async () => {
     const funds = readJson(fundFile);
     const target = funds.accounts.find((entry) => entry.id === request.params.id);
@@ -2126,7 +2126,7 @@ app.patch("/api/admin/funds/:id", requireAdmin, requirePanel("funds"), requireRo
   appendAudit(request, request.adminUser, "fund.update", account.id, { status: account.status });
   response.json({ ok: true, account });
 });
-app.delete("/api/admin/funds/:id", requireAdmin, requirePanel("funds"), requireRole("owner"), async (request, response) => {
+app.delete("/api/admin/funds/:id", requireAdmin, requirePanel("funds"), requireRole("owner"), /* 资金变更限 owner */ async (request, response) => {
   const result = await withResourceLock(async () => {
     const funds = readJson(fundFile);
     const account = funds.accounts.find((entry) => entry.id === request.params.id);
