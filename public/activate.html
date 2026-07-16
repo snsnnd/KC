@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>账号激活 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=6"></head>
+<body>
+  <header class="sub-header"><a class="sub-brand" href="/portal.html"><i></i><span>ACCOUNT ACTIVATION</span></a><a href="/portal.html?type=member">返回登录 →</a></header>
+  <main>
+    <section class="sub-hero"><div><span class="sub-kicker">[ ONE-TIME ACTIVATION ]</span><h1>激活统一账号。</h1></div><p>输入管理员提供的一次性激活码，并设置只有你本人知道的登录密码。激活码使用后立即失效。</p></section>
+    <section class="sub-content" id="activationArea">
+      <form class="member-login" id="activationForm">
+        <div><span class="sub-kicker">// SET INITIAL PASSWORD</span><h2>首次账号激活</h2></div>
+        <label class="form-field">成员账号<input name="username" autocomplete="username" required></label>
+        <label class="form-field">一次性激活码<input name="activationCode" minlength="10" maxlength="10" autocomplete="one-time-code" required></label>
+        <label class="form-field">设置登录密码<input name="nextPassword" type="password" minlength="8" autocomplete="new-password" required></label>
+        <button class="submit-button" type="submit">ACTIVATE ACCOUNT <span>→</span></button>
+        <p class="form-status" id="activationStatus" role="status"></p>
+      </form>
+      <div class="success-panel" id="activationResult" hidden><i></i><h2>账号激活完成</h2><p id="activationMessage"></p><a class="submit-button" href="/portal.html?type=member">前往成员登录 <span>→</span></a></div>
+    </section>
+  </main>
+  <div class="orientation-guard"><div><i></i>ROTATE DEVICE<br>请使用竖屏获得最佳体验</div></div>
+  <script src="assets/js/activate.js?v=1"></script>
+</body>
+</html>

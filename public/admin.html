@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex,nofollow">
   <meta name="theme-color" content="#08080a">
   <title>TSL Control | 内容管理</title>
-  <link rel="stylesheet" href="assets/css/admin.css?v=9">
+  <link rel="stylesheet" href="assets/css/admin.css?v=10">
 </head>
 <body>
   <main class="login-shell" id="loginView">
@@ -72,7 +72,7 @@
         <div class="editor-list" id="resourceEditor"></div>
       </section>
       <section class="admin-panel" data-panel-view="applications">
-        <div class="panel-heading"><div><p>// INCOMING MEMBERS</p><h1>申请收件箱</h1></div><button id="refreshApplications" type="button">刷新</button></div>
+        <div class="panel-heading"><div><p>// INCOMING MEMBERS</p><h1>申请收件箱</h1></div><div><button id="refreshApplications" type="button">刷新</button></div></div>
         <div class="application-list" id="applicationList"></div>
       </section>
       <section class="admin-panel" data-panel-view="mail">
@@ -85,6 +85,18 @@
           <label class="field">回复邮箱<input id="mailReplyTo" type="email" placeholder="回复将发送到该地址"></label>
           <label class="field">默认系统通知邮箱组（逗号或换行分隔）<textarea id="mailRecipients" placeholder="用于普通系统通知，不用于识别申请负责人"></textarea></label>
           <fieldset class="manager-access-field"><legend>申请通知负责人</legend><p>新申请按管理员身份精确投递，不使用匿名邮箱列表。</p><div class="manager-choice-grid" id="applicationRecipientManagers"></div></fieldset>
+          <fieldset class="manager-access-field"><legend>审批结果回信模板</legend><p>支持变量：{申请人}、{申请编号}、{申请类型}、{申请对象}、{数量金额}、{用途}、{结果}、{审批意见}、{审批人}、{审批时间}</p>
+            <label class="field">批准邮件主题<input id="usageApprovedSubject" maxlength="200"></label>
+            <label class="field field--wide">批准邮件正文<textarea id="usageApprovedBody" maxlength="5000"></textarea></label>
+            <label class="field">拒绝邮件主题<input id="usageRejectedSubject" maxlength="200"></label>
+            <label class="field field--wide">拒绝邮件正文<textarea id="usageRejectedBody" maxlength="5000"></textarea></label>
+          </fieldset>
+          <fieldset class="manager-access-field"><legend>加入申请结果回信模板</legend><p>支持变量：{申请人}、{申请编号}、{部门}、{学号}、{班级}、{申请理由}、{结果}、{审批意见}、{审批人}、{审批时间}</p>
+            <label class="field">通过邮件主题<input id="applicationAcceptedSubject" maxlength="200"></label>
+            <label class="field field--wide">通过邮件正文<textarea id="applicationAcceptedBody" maxlength="5000"></textarea></label>
+            <label class="field">拒绝邮件主题<input id="applicationRejectedSubject" maxlength="200"></label>
+            <label class="field field--wide">拒绝邮件正文<textarea id="applicationRejectedBody" maxlength="5000"></textarea></label>
+          </fieldset>
           <label class="field">SMTP 授权码<input id="mailAuthCode" type="password" autocomplete="new-password" placeholder="在 QQ 邮箱设置中生成，不是 QQ 密码"></label>
           <button id="saveMailButton" type="button">VERIFY &amp; SAVE CHANNEL</button>
           <button id="testMailButton" type="button">SEND TEST MESSAGE</button>
@@ -96,15 +108,18 @@
         <form class="notification-form" id="notificationForm">
           <label class="field field--wide">通知标题<input name="subject" maxlength="160" required></label>
           <label class="field field--wide">通知正文<textarea name="message" maxlength="10000" required></textarea></label>
-          <fieldset class="audience-box"><legend>发送对象</legend><label><input name="allMembers" type="checkbox"> 负责部门内全体有效成员</label><label data-owner-only><input name="includeManagers" type="checkbox"> 全体管理员</label><label data-owner-only><input name="includeDefaultRecipients" type="checkbox"> 默认邮件通知组</label></fieldset>
+          <fieldset class="audience-box"><legend>发送对象</legend><label><input name="allMembers" type="checkbox"> 负责部门内全体有效成员</label><label><input name="allApplicants" type="checkbox"> 负责部门内全部未转成员申请人</label><label data-owner-only><input name="includeManagers" type="checkbox"> 全体管理员</label><label data-owner-only><input name="includeDefaultRecipients" type="checkbox"> 默认邮件通知组</label></fieldset>
           <fieldset class="audience-box"><legend>按部门选择</legend><div id="notificationDepartments"></div></fieldset>
           <fieldset class="audience-box"><legend>按权限选择</legend><input name="permissionKeys" placeholder="resource.basic, project.internal"></fieldset>
           <fieldset class="audience-box"><legend>指定成员</legend><div class="audience-members" id="notificationMembers"></div></fieldset>
+          <fieldset class="audience-box"><legend>指定未转成员申请人</legend><div class="audience-members" id="notificationApplicants"></div></fieldset>
           <label class="field field--wide" data-owner-only>其他邮箱（逗号或换行分隔）<textarea name="customEmails" placeholder="external@example.com"></textarea></label>
           <div class="notification-summary" id="notificationSummary">等待选择发送对象</div>
           <button type="submit">SEND NOTIFICATION</button>
           <p class="form-message" id="notificationMessage" role="status"></p>
         </form>
+        <div class="section-title-admin"><p>// MEMBER SUPPORT</p><h2>成员问询</h2></div>
+        <div class="notification-history" id="memberMessageAdminList"></div>
         <div class="section-title-admin"><p>// DISPATCH HISTORY</p><h2>发送历史</h2></div>
         <div class="notification-history" id="notificationHistory"></div>
       </section>
@@ -121,15 +136,14 @@
       <section class="admin-panel" data-panel-view="members">
         <div class="panel-heading"><div><p>// MEMBER DIRECTORY &amp; ACL</p><h1>人员管理</h1></div><a href="/member.html" target="_blank">成员中心 ↗</a></div>
         <form class="manager-form" id="memberForm">
-          <label class="field">登录账号<input name="username" pattern="[a-z0-9._-]{3,40}" required></label>
           <label class="field">姓名<input name="name" required></label>
-          <label class="field">学号<input name="studentId"></label>
+          <label class="field">学号<input name="studentId" pattern="[A-Za-z0-9]{4,30}" required></label>
           <label class="field">班级<input name="className"></label>
           <label class="field">邮箱<input name="email" type="email"></label>
           <label class="field">联系方式<input name="contact"></label>
           <label class="field">所属部门<select name="departmentId" id="memberDepartment"></select></label>
           <label class="field">资源权限（逗号分隔）<input name="permissions" placeholder="resource.basic, project.internal"></label>
-          <label class="field">初始密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+          <p class="form-message">登录账号按“部门简写 + 学号”自动生成；系统只显示一次随机激活码，有邮箱时会同步发送给成员。</p>
           <button type="submit">CREATE MEMBER</button>
           <p class="form-message" id="memberMessage" role="status"></p>
         </form>
@@ -138,13 +152,10 @@
       <section class="admin-panel" data-panel-view="managers" data-owner-only>
         <div class="panel-heading"><div><p>// ACCESS CONTROL</p><h1>管理员</h1></div></div>
         <form class="manager-form" id="managerForm">
-          <label class="field">登录账号<input name="username" pattern="[a-z0-9._-]{3,40}" required></label>
-          <label class="field">显示名称<input name="displayName" required></label>
-          <label class="field">邮箱<input name="email" type="email"></label>
+          <label class="field">成员账号（仅显示已完成激活的账号）<select name="memberId" id="managerMember" required></select></label>
           <label class="field">角色<select name="role"><option value="editor">内容编辑</option><option value="reviewer">申请审核</option><option value="owner">主管理员</option></select></label>
           <fieldset class="manager-access-field"><legend>可管理模块</legend><div class="manager-choice-grid" id="managerPanelPermissions"></div></fieldset>
           <fieldset class="manager-access-field"><legend>负责部门</legend><div class="manager-choice-grid" id="managerDepartments"></div></fieldset>
-          <label class="field">初始密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
           <button type="submit">CREATE MANAGER</button>
           <p class="form-message" id="managerMessage" role="status"></p>
         </form>
@@ -176,6 +187,6 @@
       </section>
     </main>
   </div>
-  <script src="assets/js/admin.js?v=10"></script>
+  <script src="assets/js/admin.js?v=21"></script>
 </body>
 </html>

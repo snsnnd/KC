@@ -18,7 +18,7 @@ assert.equal(health.body.ok, true);
 const content = await json("/api/content");
 assert.ok(content.body.projects.every((project) => project.category), "a project is missing its category");
 
-for (const path of ["/", "/portal.html", "/email-approval.html", "/admin.html", "/admin.html?workspace=operations", "/admin.html?workspace=people", "/admin.html?workspace=assets", "/join.html", "/member.html", "/assets/css/home.css", "/assets/js/app.js", "/assets/js/portal.js", "/assets/js/email-approval.js"]) {
+for (const path of ["/", "/portal.html", "/activate.html", "/email-approval.html", "/admin.html", "/admin.html?workspace=operations", "/admin.html?workspace=people", "/admin.html?workspace=assets", "/join.html", "/member.html", "/resources.html", "/resource.html?id=source-index", "/assets/css/home.css", "/assets/css/subpage.css", "/assets/js/app.js", "/assets/js/activate.js", "/assets/js/admin.js", "/assets/js/member.js", "/assets/js/resources.js", "/assets/js/portal.js", "/assets/js/email-approval.js"]) {
   const response = await fetch(`${base}${path}`);
   assert.equal(response.status, 200, `${path} did not load`);
 }
@@ -32,13 +32,20 @@ assert.equal(login.body.user.role, "owner");
 assert.ok(login.body.user.panelPermissions.includes("managers"));
 const cookie = login.response.headers.getSetCookie()[0].split(";", 1)[0];
 
-const [, , , , mail] = await Promise.all([
+const [, , , , mail, notificationAudience] = await Promise.all([
   json("/api/admin/content", { headers: { cookie } }),
   json("/api/admin/applications", { headers: { cookie } }),
   json("/api/admin/inventory", { headers: { cookie } }),
   json("/api/admin/funds", { headers: { cookie } }),
-  json("/api/admin/mail", { headers: { cookie } })
+  json("/api/admin/mail", { headers: { cookie } }),
+  json("/api/admin/notification-audience", { headers: { cookie } })
 ]);
 assert.ok(mail.body.applicationRecipientAdminIds.length > 0);
+assert.ok(mail.body.usageApprovedSubject.includes("{申请编号}"));
+assert.ok(mail.body.usageRejectedBody.includes("{审批意见}"));
+assert.ok(mail.body.applicationAcceptedSubject.includes("{申请编号}"));
+assert.ok(mail.body.applicationRejectedBody.includes("{审批意见}"));
+assert.ok(Array.isArray(notificationAudience.body.members));
+assert.ok(Array.isArray(notificationAudience.body.applicants));
 
 console.log(JSON.stringify({ ok: true, mail: health.body.mail, projects: content.body.projects.length, adminRole: login.body.user.role }));

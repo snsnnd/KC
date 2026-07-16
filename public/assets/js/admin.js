@@ -1,7 +1,13 @@
 (function () {
   "use strict";
 
-  const state = { csrf: "", user: null, workspace: "home", content: null, applications: [], mail: null, managers: [], members: [], resourceSecrets: {}, notifications: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], audit: [], syncTimer: 0 };
+  const initialUrl = new URL(window.location.href);
+  const requestedApplicantId = initialUrl.searchParams.get("notifyApplicant") || "";
+  if (requestedApplicantId) {
+    initialUrl.searchParams.delete("notifyApplicant");
+    window.history.replaceState(null, "", `${initialUrl.pathname}${initialUrl.search}${initialUrl.hash}`);
+  }
+  const state = { csrf: "", user: null, workspace: "home", content: null, applications: [], mail: null, managers: [], members: [], notificationAudience: { members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }, requestedApplicantId, resourceSecrets: {}, notifications: [], memberMessages: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], audit: [], syncTimer: 0 };
   const workspaces = {
     operations: { name: "运营宣发", code: "OPERATIONS", panels: ["settings", "projects", "mail", "notifications", "uploads"] },
     people: { name: "人员管理", code: "PEOPLE", panels: ["departments", "applications", "members", "managers", "audit"] },
@@ -47,6 +53,22 @@
   function setStatus(message, isError = false) {
     saveStatus.textContent = message;
     saveStatus.style.color = isError ? "var(--orange)" : "var(--accent)";
+  }
+
+  async function refreshPanel(button, load, render, successMessage) {
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "刷新中...";
+    try {
+      await load();
+      render();
+      setStatus(successMessage);
+    } catch (error) {
+      setStatus(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 
   function field(labelText, value, key, options = {}) {
@@ -184,7 +206,7 @@
       });
       const grid = document.createElement("div");
       grid.className = "editor-grid";
-      grid.append(field("部门 ID", department.id, "id"), field("部门名称", department.name, "name"), field("部门介绍", department.description, "description", { wide: true, multiline: true }));
+      grid.append(field("部门 ID", department.id, "id"), field("部门名称", department.name, "name"), field("账号简写", department.accountPrefix || "", "accountPrefix", { placeholder: "例如 S" }), field("部门介绍", department.description, "description", { wide: true, multiline: true }));
       const openLabel = document.createElement("label");
       openLabel.className = "check-field";
       const open = document.createElement("input");
@@ -201,25 +223,54 @@
   function renderResources() {
     const editor = document.querySelector("#resourceEditor");
     editor.replaceChildren();
-    state.content.resources.forEach((resource, index) => {
-      const article = card(`${String(index + 1).padStart(2, "0")} / ${resource.title || "未命名资源"}`, index, () => {
-        state.content = collectContent();
-        state.content.resources.splice(index, 1);
-        renderResources();
+    state.content.resources.forEach((resource, index) => editor.appendChild(createResourceNodeEditor(resource, index, 0)));
+  }
+
+  function createResourceNodeEditor(resource, index, depth) {
+    let article;
+    article = card(`${depth ? "子资源" : String(index + 1).padStart(2, "0")} / ${resource.title || "未命名资源"}`, index, () => article.remove());
+    article.classList.add("resource-node-editor");
+    article.dataset.resourceNode = "true";
+    article.dataset.depth = String(depth);
+    const grid = document.createElement("div");
+    grid.className = "editor-grid";
+    grid.append(
+      field("资源 ID（全站唯一）", resource.id, "id"), field("资源名称", resource.title, "title"),
+      field("资源类型", resource.type, "type", { placeholder: (resource.children || []).length ? "COLLECTION" : "WEBSITE" }), field("主链接", resource.url, "url"),
+      field("资源介绍", resource.description, "description", { wide: true, multiline: true }),
+      field("公开访问说明", resource.accessNote, "accessNote", { wide: true }),
+      field("权限标识（子资源会继承合集权限）", resource.permissionKey || "", "permissionKey", { placeholder: "resource.basic" }),
+      field("受保护密码 / 提取码", Object.hasOwn(resource, "accessSecret") ? resource.accessSecret : state.resourceSecrets[resource.id] || "", "accessSecret", { placeholder: "该节点的所有链接共用" })
+    );
+    const links = document.createElement("div");
+    links.className = "link-editor resource-link-editor";
+    links.dataset.resourceLinks = "true";
+    (resource.links || []).forEach((link) => addLinkRow(links, link));
+    const addLink = document.createElement("button");
+    addLink.type = "button";
+    addLink.className = "small-button";
+    addLink.textContent = "+ 添加链接";
+    addLink.addEventListener("click", () => addLinkRow(links, { label: "打开资源", url: "" }));
+    links.appendChild(addLink);
+    grid.appendChild(links);
+    article.appendChild(grid);
+    if (depth < 2) {
+      const children = document.createElement("div");
+      children.className = "resource-children-editor";
+      children.dataset.resourceChildren = "true";
+      (resource.children || []).forEach((child, childIndex) => children.appendChild(createResourceNodeEditor(child, childIndex, depth + 1)));
+      const addChild = document.createElement("button");
+      addChild.type = "button";
+      addChild.className = "small-button resource-add-child";
+      addChild.textContent = "+ 添加子资源";
+      addChild.addEventListener("click", () => {
+        const childIndex = children.querySelectorAll(":scope > [data-resource-node]").length;
+        children.insertBefore(createResourceNodeEditor({ id: "", title: "新子资源", description: "", type: "WEBSITE", url: "", links: [], accessNote: "", permissionKey: "", children: [] }, childIndex, depth + 1), addChild);
       });
-      const grid = document.createElement("div");
-      grid.className = "editor-grid";
-      grid.append(
-        field("资源 ID", resource.id, "id"), field("资源名称", resource.title, "title"),
-        field("资源类型", resource.type, "type"), field("目标地址", resource.url, "url"),
-        field("资源介绍", resource.description, "description", { wide: true, multiline: true }),
-        field("公开访问说明", resource.accessNote, "accessNote", { wide: true }),
-        field("权限标识（留空表示公开）", resource.permissionKey || "", "permissionKey", { placeholder: "resource.basic" }),
-        field("受保护密码 / 提取码", state.resourceSecrets[resource.id] || "", "accessSecret", { placeholder: "仅授权成员可读取" })
-      );
-      article.appendChild(grid);
-      editor.appendChild(article);
-    });
+      children.appendChild(addChild);
+      article.appendChild(children);
+    }
+    return article;
   }
 
   function collectFields(root) {
@@ -237,7 +288,16 @@
       return { ...values, tags: values.tags.split(",").map((tag) => tag.trim()).filter(Boolean), links };
     });
     const departments = [...document.querySelectorAll("#departmentEditor .editor-card")].map(collectFields);
-    const resources = [...document.querySelectorAll("#resourceEditor .editor-card")].map(collectFields);
+    const collectResourceNode = (article) => {
+      const resource = collectFields(article.querySelector(":scope > .editor-grid"));
+      const linkEditor = article.querySelector(":scope > .editor-grid > [data-resource-links]");
+      resource.links = [...linkEditor.querySelectorAll(":scope > .link-row")].map((row) => ({ label: row.querySelector('[data-link-field="label"]').value, url: row.querySelector('[data-link-field="url"]').value }));
+      const children = article.querySelector(":scope > [data-resource-children]");
+      resource.children = children ? [...children.children].filter((child) => child.matches("[data-resource-node]")).map(collectResourceNode) : [];
+      if (!resource.accessSecret && state.resourceSecrets[resource.id]) resource.clearSecret = true;
+      return resource;
+    };
+    const resources = [...document.querySelectorAll("#resourceEditor > [data-resource-node]")].map(collectResourceNode);
     return { settings, projects, departments, resources, _meta: state.content._meta || { revision: 0 } };
   }
 
@@ -246,7 +306,7 @@
       setStatus("SAVING...");
       const payload = await api("/api/admin/content", { method: "PUT", body: JSON.stringify(collectContent()) });
       state.content = payload.content;
-      state.resourceSecrets = await api("/api/admin/resource-secrets");
+      state.resourceSecrets = canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? await api("/api/admin/resource-secrets") : {};
       renderAllEditors();
       setStatus("SAVED / SYNCED");
     } catch (error) {
@@ -295,11 +355,13 @@
       });
       status.addEventListener("change", async () => {
         try {
-          await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "PATCH", body: JSON.stringify({ status: status.value }) });
-          application.status = status.value;
+          const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "PATCH", body: JSON.stringify({ status: status.value }) });
+          Object.assign(application, payload.application);
           renderApplications();
+          if (["accepted", "rejected"].includes(status.value)) setStatus(payload.notified ? "APPLICATION DECIDED / RESULT EMAIL SENT" : "APPLICATION DECIDED / RESULT EMAIL NOT SENT", !payload.notified);
         } catch (error) {
           setStatus(error.message, true);
+          status.value = application.status;
         }
       });
       const remove = document.createElement("button");
@@ -317,26 +379,78 @@
         }
       });
       controls.appendChild(status);
+      if (["accepted", "rejected"].includes(application.status)) status.disabled = true;
+      if (!application.memberId) {
+        const reviewNote = document.createElement("textarea");
+        reviewNote.placeholder = "审批意见（可选，将写入结果邮件）";
+        const approve = document.createElement("button");
+        approve.type = "button";
+        approve.className = "small-button";
+        approve.textContent = "通过申请";
+        const reject = document.createElement("button");
+        reject.type = "button";
+        reject.className = "danger-button";
+        reject.textContent = "拒绝申请";
+        const decide = async (decision) => {
+          approve.disabled = true;
+          reject.disabled = true;
+          try {
+            const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "PATCH", body: JSON.stringify({ status: decision, reviewNote: reviewNote.value }) });
+            Object.assign(application, payload.application);
+            renderApplications();
+            setStatus(payload.notified ? "APPLICATION DECIDED / RESULT EMAIL SENT" : "APPLICATION DECIDED / RESULT EMAIL NOT SENT", !payload.notified);
+          } catch (error) {
+            setStatus(error.message, true);
+            approve.disabled = false;
+            reject.disabled = false;
+          }
+        };
+        const decisionButtons = [];
+        if (application.status !== "accepted") { approve.addEventListener("click", () => decide("accepted")); decisionButtons.push(approve); }
+        if (application.status !== "rejected") { reject.addEventListener("click", () => decide("rejected")); decisionButtons.push(reject); }
+        controls.append(reviewNote, ...decisionButtons);
+        if (!["accepted", "rejected"].includes(application.status)) {
+          const resend = document.createElement("button");
+          resend.type = "button";
+          resend.className = "small-button";
+          resend.textContent = "重发审批邮件";
+          resend.addEventListener("click", async () => {
+            resend.disabled = true;
+            try {
+              const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}/send-approval-email`, { method: "POST", body: "{}" });
+              setStatus(payload.notified ? "APPROVAL EMAIL SENT" : "APPROVAL EMAIL NOT SENT", !payload.notified);
+            } catch (error) { setStatus(error.message, true); }
+            finally { resend.disabled = false; }
+          });
+          controls.appendChild(resend);
+        }
+        if (application.email) {
+          const notify = document.createElement("button");
+          notify.type = "button";
+          notify.className = "small-button";
+          notify.textContent = "通知此申请人";
+          notify.addEventListener("click", () => window.location.assign(`/admin.html?workspace=operations&notifyApplicant=${encodeURIComponent(application.id)}#notifications`));
+          controls.appendChild(notify);
+        }
+      } else {
+        status.disabled = true;
+      }
       if (["owner", "editor"].includes(state.user?.role)) {
-        if (!application.memberId) {
+        if (!application.memberId && application.status === "accepted" && canAccessPanel("members")) {
           const promote = document.createElement("button");
           promote.type = "button";
           promote.className = "small-button";
           promote.textContent = "转为成员";
           promote.addEventListener("click", async () => {
-            const suggested = (application.email?.split("@")[0] || application.studentId || application.name).toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 40);
-            const username = window.prompt("成员登录账号", suggested);
-            if (!username) return;
-            const password = window.prompt("初始密码（至少 8 位）");
-            if (!password) return;
             const permissionText = window.prompt("初始资源权限（逗号分隔，可留空）", "resource.basic") || "";
             try {
-              const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}/promote`, { method: "POST", body: JSON.stringify({ username, password, permissions: permissionText.split(",").map((item) => item.trim()).filter(Boolean) }) });
+              const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}/promote`, { method: "POST", body: JSON.stringify({ permissions: permissionText.split(",").map((item) => item.trim()).filter(Boolean) }) });
               Object.assign(application, payload.application);
               state.members.push(payload.member);
               renderApplications();
               if (canAccessPanel("members")) renderMembers();
-              setStatus("MEMBER ACCOUNT CREATED");
+              if (state.user.role === "owner") renderManagerFormAccess();
+              setStatus(`MEMBER CREATED / ${payload.member.username} / 激活码 ${payload.activationCode}${payload.activationNotified ? " / 已发送邮箱" : " / 请转交成员"}`);
             } catch (error) { setStatus(error.message, true); }
           });
           controls.appendChild(promote);
@@ -364,18 +478,26 @@
     document.querySelector("#mailSenderName").value = state.mail?.senderName || `${state.content.settings.clubName}运营组`;
     document.querySelector("#mailReplyTo").value = state.mail?.replyTo || state.mail?.email || state.content.settings.managerEmail || "";
     document.querySelector("#mailRecipients").value = (state.mail?.recipients || [state.content.settings.managerEmail].filter(Boolean)).join("\n");
+    document.querySelector("#usageApprovedSubject").value = state.mail?.usageApprovedSubject || "";
+    document.querySelector("#usageApprovedBody").value = state.mail?.usageApprovedBody || "";
+    document.querySelector("#usageRejectedSubject").value = state.mail?.usageRejectedSubject || "";
+    document.querySelector("#usageRejectedBody").value = state.mail?.usageRejectedBody || "";
+    document.querySelector("#applicationAcceptedSubject").value = state.mail?.applicationAcceptedSubject || "";
+    document.querySelector("#applicationAcceptedBody").value = state.mail?.applicationAcceptedBody || "";
+    document.querySelector("#applicationRejectedSubject").value = state.mail?.applicationRejectedSubject || "";
+    document.querySelector("#applicationRejectedBody").value = state.mail?.applicationRejectedBody || "";
     document.querySelector("#mailAuthCode").placeholder = configured ? "已加密保存，留空可保留当前授权码" : "在 QQ 邮箱设置中生成，不是 QQ 密码";
     document.querySelector("#testMailButton").disabled = !configured;
     const recipientContainer = document.querySelector("#applicationRecipientManagers");
     recipientContainer.replaceChildren();
     const selectedRecipients = new Set(state.mail?.applicationRecipientAdminIds || []);
-    state.managers.filter((manager) => manager.email).forEach((manager) => {
+    state.managers.filter((manager) => manager.status === "active" && manager.email && canAccessPanel("applications", manager)).forEach((manager) => {
       const label = document.createElement("label");
       const input = document.createElement("input");
       input.type = "checkbox";
       input.value = manager.id;
       input.checked = selectedRecipients.has(manager.id);
-      label.append(input, document.createTextNode(`${manager.displayName} / @${manager.username} / ${manager.email}`));
+      label.append(input, document.createTextNode(`${manager.displayName} / @${manager.username} / ${manager.email} / ${manager.departmentIds.join(", ") || "全部部门"}`));
       recipientContainer.appendChild(label);
     });
   }
@@ -398,6 +520,21 @@
 
   function renderManagerFormAccess() {
     const form = document.querySelector("#managerForm");
+    const memberSelect = document.querySelector("#managerMember");
+    const selectedMemberId = memberSelect.value;
+    const assignedMemberIds = new Set(state.managers.map((manager) => manager.memberId).filter(Boolean));
+    memberSelect.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "选择现有成员账号";
+    memberSelect.appendChild(placeholder);
+    state.members.filter((member) => member.status === "active" && !member.mustChangePassword && !assignedMemberIds.has(member.id)).forEach((member) => {
+      const option = document.createElement("option");
+      option.value = member.id;
+      option.textContent = `${member.name} / ${member.username} / ${member.studentId}`;
+      memberSelect.appendChild(option);
+    });
+    memberSelect.value = selectedMemberId;
     const isOwner = form.elements.role.value === "owner";
     renderAccessChoices(document.querySelector("#managerPanelPermissions"), Object.entries(assignablePanels), [], "panelPermissions", isOwner);
     renderAccessChoices(document.querySelector("#managerDepartments"), state.content.departments.map((department) => [department.id, department.name]), [], "departmentIds", isOwner);
@@ -415,8 +552,14 @@
       const username = document.createElement("code");
       username.textContent = `@${manager.username}${manager.id === state.user.id ? " / CURRENT" : ""}`;
       identity.append(name, username);
-      const email = document.createElement("p");
-      email.textContent = manager.email || "未设置邮箱";
+      const emailField = document.createElement("label");
+      emailField.className = "field";
+      emailField.append(document.createTextNode(manager.memberId ? "成员邮箱" : "管理员邮箱"));
+      const email = document.createElement("input");
+      email.type = "email";
+      email.value = manager.email || "";
+      email.disabled = Boolean(manager.memberId);
+      emailField.appendChild(email);
       const role = document.createElement("select");
       [["owner", "主管理员"], ["editor", "内容编辑"], ["reviewer", "申请审核"]].forEach(([value, label]) => {
         const option = document.createElement("option");
@@ -425,6 +568,15 @@
         option.selected = manager.role === value;
         role.appendChild(option);
       });
+      const managerStatus = document.createElement("select");
+      [["active", "账号启用"], ["disabled", "账号停用"]].forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        option.selected = manager.status === value;
+        managerStatus.appendChild(option);
+      });
+      managerStatus.disabled = manager.id === state.user.id;
       const actions = document.createElement("div");
       actions.className = "manager-card__actions";
       const accessEditor = document.createElement("div");
@@ -459,25 +611,28 @@
         try {
           const panelPermissions = [...panelChoices.querySelectorAll("input:checked")].map((input) => input.value);
           const departmentIds = [...departmentChoices.querySelectorAll("input:checked")].map((input) => input.value);
-          const payload = await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ role: role.value, panelPermissions, departmentIds }) });
+          const payload = await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ email: email.value, role: role.value, status: managerStatus.value, panelPermissions, departmentIds }) });
           Object.assign(manager, payload.manager);
           renderAccess();
           setStatus("MANAGER UPDATED");
         } catch (error) { setStatus(error.message, true); role.value = manager.role; }
       });
-      const password = document.createElement("button");
-      password.type = "button";
-      password.className = "small-button";
-      password.textContent = "重置密码";
-      password.addEventListener("click", async () => {
-        const nextPassword = window.prompt(`为 ${manager.username} 设置新密码（至少 8 位）`);
-        if (!nextPassword) return;
-        try {
-          await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ password: nextPassword }) });
-          setStatus("PASSWORD UPDATED");
-        } catch (error) { setStatus(error.message, true); }
-      });
-      actions.append(save, password);
+      actions.appendChild(save);
+      if (!manager.memberId) {
+        const password = document.createElement("button");
+        password.type = "button";
+        password.className = "small-button";
+        password.textContent = "重置密码";
+        password.addEventListener("click", async () => {
+          const nextPassword = window.prompt(`为 ${manager.username} 设置新密码（至少 8 位）`);
+          if (!nextPassword) return;
+          try {
+            await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "PATCH", body: JSON.stringify({ password: nextPassword }) });
+            setStatus("PASSWORD UPDATED");
+          } catch (error) { setStatus(error.message, true); }
+        });
+        actions.appendChild(password);
+      }
       if (manager.id !== state.user.id) {
         const remove = document.createElement("button");
         remove.type = "button";
@@ -486,14 +641,15 @@
         remove.addEventListener("click", async () => {
           if (!window.confirm(`确认删除管理员 ${manager.username}？`)) return;
           try {
-            await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "DELETE", body: "{}" });
-            state.managers = state.managers.filter((item) => item.id !== manager.id);
-            renderManagers();
+             await api(`/api/admin/managers/${encodeURIComponent(manager.id)}`, { method: "DELETE", body: "{}" });
+             state.managers = state.managers.filter((item) => item.id !== manager.id);
+             renderManagers();
+             renderManagerFormAccess();
           } catch (error) { setStatus(error.message, true); }
         });
         actions.appendChild(remove);
       }
-      article.append(identity, email, role, actions, accessEditor);
+      article.append(identity, emailField, role, managerStatus, actions, accessEditor);
       list.appendChild(article);
     });
   }
@@ -520,7 +676,7 @@
       identity.append(name, username);
       const contact = document.createElement("p");
       const department = state.content.departments.find((item) => item.id === member.departmentId);
-      contact.textContent = `${department?.name || member.departmentId || "未分配部门"}\n学号：${member.studentId || "未填写"}\n班级：${member.className || "未填写"}\n${member.email || member.contact || "未填写联系方式"}`;
+      contact.textContent = `${department?.name || member.departmentId || "未分配部门"}\n学号：${member.studentId || "未填写"}\n班级：${member.className || "未填写"}\n${member.email || member.contact || "未填写联系方式"}\n账号状态：${member.mustChangePassword ? "等待激活" : "已激活"}`;
       const access = document.createElement("div");
       const status = document.createElement("select");
       [["active", "正常"], ["suspended", "已停用"]].forEach(([value, label]) => {
@@ -548,11 +704,18 @@
             setStatus("MEMBER ACCESS UPDATED");
           } catch (error) { setStatus(error.message, true); }
         });
-        const reset = document.createElement("button");
-        reset.type = "button";
-        reset.className = "small-button";
-        reset.textContent = "重置密码";
-        reset.addEventListener("click", async () => {
+        const credentialAction = document.createElement("button");
+        credentialAction.type = "button";
+        credentialAction.className = "small-button";
+        credentialAction.textContent = member.mustChangePassword ? "重新签发激活码" : "重置密码";
+        credentialAction.addEventListener("click", async () => {
+          if (member.mustChangePassword) {
+            try {
+              const payload = await api(`/api/admin/members/${encodeURIComponent(member.id)}/activation-code`, { method: "POST", body: "{}" });
+              window.prompt(`一次性激活码${payload.activationNotified ? "（已发送邮箱）" : "（请转交成员）"}`, payload.activationCode);
+            } catch (error) { setStatus(error.message, true); }
+            return;
+          }
           const password = window.prompt(`为成员 ${member.username} 设置新密码（至少 8 位）`);
           if (!password) return;
           try { await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "PATCH", body: JSON.stringify({ password }) }); setStatus("MEMBER PASSWORD UPDATED"); }
@@ -567,7 +730,7 @@
           try { await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "DELETE", body: "{}" }); state.members = state.members.filter((item) => item.id !== member.id); renderMembers(); }
           catch (error) { setStatus(error.message, true); }
         });
-        actions.append(save, reset);
+        actions.append(save, credentialAction);
         if (state.user.role === "owner") actions.appendChild(remove);
       }
       article.append(identity, contact, access, actions);
@@ -590,7 +753,7 @@
     });
     const members = document.querySelector("#notificationMembers");
     members.replaceChildren();
-    state.members.filter((member) => member.status === "active" && member.email).forEach((member) => {
+    state.notificationAudience.members.forEach((member) => {
       const label = document.createElement("label");
       const input = document.createElement("input");
       input.type = "checkbox";
@@ -600,6 +763,21 @@
       members.appendChild(label);
     });
     if (!members.children.length) members.textContent = "暂无具有邮箱的有效成员";
+    const applicants = document.querySelector("#notificationApplicants");
+    applicants.replaceChildren();
+    state.notificationAudience.applicants.forEach((application) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "applicationIds";
+      input.value = application.id;
+      input.checked = application.id === state.requestedApplicantId;
+      label.append(input, document.createTextNode(` ${application.name} / ${application.email} / ${application.departmentName} / ${application.status}`));
+      applicants.appendChild(label);
+    });
+    state.requestedApplicantId = "";
+    if (!applicants.children.length) applicants.textContent = "暂无具有邮箱的未转成员申请人";
+    renderMemberMessageAdminList();
     renderNotificationHistory();
     updateNotificationSummary();
   }
@@ -626,14 +804,61 @@
     if (!state.notifications.length) history.textContent = "NO NOTIFICATIONS SENT";
   }
 
+  function renderMemberMessageAdminList() {
+    const list = document.querySelector("#memberMessageAdminList");
+    list.replaceChildren();
+    state.memberMessages.forEach((thread) => {
+      const article = document.createElement("article");
+      article.className = "notification-record";
+      const content = document.createElement("div");
+      const title = document.createElement("h3");
+      title.textContent = `${thread.memberName} / ${thread.subject}`;
+      const detail = document.createElement("p");
+      detail.textContent = `${thread.message}\n\n${(thread.replies || []).map((reply) => `${reply.sender === "member" || reply.member ? thread.memberName : reply.admin?.displayName || "管理员"}：${reply.message}`).join("\n") || "尚未回复"}`;
+      content.append(title, detail);
+      const actions = document.createElement("div");
+      const meta = document.createElement("code");
+      meta.textContent = `${thread.id}\n${thread.status === "closed" ? "CLOSED" : "OPEN"}`;
+      const reply = document.createElement("textarea");
+      reply.placeholder = "回复成员";
+      reply.maxLength = 5000;
+      const sendReply = async (close) => {
+        if (reply.value.trim().length < 2) { setStatus("请填写回复内容", true); return; }
+        try {
+          const payload = await api(`/api/admin/member-messages/${encodeURIComponent(thread.id)}/replies`, { method: "POST", body: JSON.stringify({ message: reply.value, close }) });
+          Object.assign(thread, payload.thread);
+          renderMemberMessageAdminList();
+          setStatus(payload.notified ? "REPLY SENT / MEMBER EMAILED" : "REPLY SAVED / MEMBER EMAIL NOT SENT", !payload.notified);
+        } catch (error) { setStatus(error.message, true); }
+      };
+      const replyButton = document.createElement("button");
+      replyButton.type = "button";
+      replyButton.className = "small-button";
+      replyButton.textContent = "回复";
+      replyButton.addEventListener("click", () => sendReply(false));
+      const closeButton = document.createElement("button");
+      closeButton.type = "button";
+      closeButton.className = "small-button";
+      closeButton.textContent = "回复并结束";
+      closeButton.addEventListener("click", () => sendReply(true));
+      actions.appendChild(meta);
+      if (thread.status !== "closed") actions.append(reply, replyButton, closeButton);
+      article.append(content, actions);
+      list.appendChild(article);
+    });
+    if (!state.memberMessages.length) list.textContent = "NO MEMBER QUESTIONS / 暂无成员问询";
+  }
+
   function updateNotificationSummary() {
     const form = document.querySelector("#notificationForm");
     const allMembers = form.elements.allMembers.checked;
+    const allApplicants = form.elements.allApplicants.checked;
     const selectedMembers = form.querySelectorAll('[name="memberIds"]:checked').length;
+    const selectedApplicants = form.querySelectorAll('[name="applicationIds"]:checked').length;
     const selectedDepartments = form.querySelectorAll('[name="departmentIds"]:checked').length;
     const permissionKeys = form.elements.permissionKeys.value.split(",").map((item) => item.trim()).filter(Boolean).length;
     const customEmails = form.elements.customEmails.value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean).length;
-    document.querySelector("#notificationSummary").textContent = `AUDIENCE / ${allMembers ? `ALL MEMBERS ${state.members.filter((member) => member.status === "active" && member.email).length}` : `MEMBERS ${selectedMembers}`} / DEPARTMENTS ${selectedDepartments} / PERMISSIONS ${permissionKeys} / CUSTOM ${customEmails}${form.elements.includeManagers.checked ? " / MANAGERS" : ""}${form.elements.includeDefaultRecipients.checked ? " / DEFAULT GROUP" : ""}`;
+    document.querySelector("#notificationSummary").textContent = `AUDIENCE / ${allMembers ? `ALL MEMBERS ${state.notificationAudience.members.length}` : `MEMBERS ${selectedMembers}`} / ${allApplicants ? `ALL APPLICANTS ${state.notificationAudience.applicants.length}` : `APPLICANTS ${selectedApplicants}`} / DEPARTMENTS ${selectedDepartments} / PERMISSIONS ${permissionKeys} / CUSTOM ${customEmails}${form.elements.includeManagers.checked ? " / MANAGERS" : ""}${form.elements.includeDefaultRecipients.checked ? " / DEFAULT GROUP" : ""}`;
   }
 
   function renderInventory() {
@@ -657,6 +882,17 @@
       const actions = document.createElement("div");
       actions.className = "inventory-actions";
       if (["owner", "editor"].includes(state.user.role)) {
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "small-button";
+        archive.textContent = item.status === "active" ? "归档" : "重新启用";
+        archive.addEventListener("click", async () => {
+          try {
+            const payload = await api(`/api/admin/inventory/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: item.status === "active" ? "archived" : "active" }) });
+            Object.assign(item, payload.item);
+            renderInventory();
+          } catch (error) { setStatus(error.message, true); }
+        });
         const restock = document.createElement("button");
         restock.type = "button";
         restock.className = "small-button";
@@ -669,7 +905,23 @@
           try { const payload = await api(`/api/admin/inventory/${item.id}/restock`, { method: "POST", body: JSON.stringify({ quantity, reason }) }); Object.assign(item, payload.item); state.inventory = await api("/api/admin/inventory"); renderInventory(); }
           catch (error) { setStatus(error.message, true); }
         });
-        actions.appendChild(restock);
+        actions.append(archive, restock);
+        if (state.user.role === "owner") {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "danger-button";
+          remove.textContent = "删除";
+          remove.addEventListener("click", async () => {
+            if (!window.confirm(`确认删除材料“${item.name}”？剩余 ${item.quantity} ${item.unit} 将记为库存核销，历史流水会保留。`)) return;
+            try {
+              await api(`/api/admin/inventory/${item.id}`, { method: "DELETE", body: "{}" });
+              state.inventory = await api("/api/admin/inventory");
+              renderInventory();
+              setStatus("MATERIAL DELETED / LEDGER PRESERVED");
+            } catch (error) { setStatus(error.message, true); }
+          });
+          actions.appendChild(remove);
+        }
       }
       article.append(code, title, meta, value, actions);
       list.appendChild(article);
@@ -699,6 +951,17 @@
       const actions = document.createElement("div");
       actions.className = "inventory-actions";
       if (state.user.role === "owner") {
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "small-button";
+        archive.textContent = account.status === "active" ? "归档" : "重新启用";
+        archive.addEventListener("click", async () => {
+          try {
+            const payload = await api(`/api/admin/funds/${account.id}`, { method: "PATCH", body: JSON.stringify({ status: account.status === "active" ? "archived" : "active" }) });
+            Object.assign(account, payload.account);
+            renderFunds();
+          } catch (error) { setStatus(error.message, true); }
+        });
         const topup = document.createElement("button");
         topup.type = "button";
         topup.className = "small-button";
@@ -711,7 +974,20 @@
           try { const payload = await api(`/api/admin/funds/${account.id}/topup`, { method: "POST", body: JSON.stringify({ amount, reason }) }); Object.assign(account, payload.account); state.funds = await api("/api/admin/funds"); renderFunds(); }
           catch (error) { setStatus(error.message, true); }
         });
-        actions.appendChild(topup);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger-button";
+        remove.textContent = "删除";
+        remove.addEventListener("click", async () => {
+          if (!window.confirm(`确认删除资金账户“${account.name}”？剩余 ${Number(account.balance).toFixed(2)} ${account.currency} 将记为余额核销，历史流水会保留。`)) return;
+          try {
+            await api(`/api/admin/funds/${account.id}`, { method: "DELETE", body: "{}" });
+            state.funds = await api("/api/admin/funds");
+            renderFunds();
+            setStatus("FUND ACCOUNT DELETED / LEDGER PRESERVED");
+          } catch (error) { setStatus(error.message, true); }
+        });
+        actions.append(archive, topup, remove);
       }
       article.append(code, title, meta, value, actions);
       list.appendChild(article);
@@ -778,6 +1054,7 @@
             if (canAccessPanel("inventory")) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
             if (canAccessPanel("funds")) { state.funds = await api("/api/admin/funds"); renderFunds(); }
             renderUsageRequests();
+            setStatus(payload.notified ? "DECISION SAVED / RESULT EMAIL SENT" : "DECISION SAVED / RESULT EMAIL NOT SENT", !payload.notified);
           }
           catch (error) { setStatus(error.message, true); }
         };
@@ -867,19 +1144,25 @@
       }
       const localNew = state.applications.filter((item) => item.status === "new").length;
       const localApplicationUpdate = state.applications.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if (sync.applications && (sync.applications.total !== state.applications.length || sync.applications.new !== localNew || (sync.applications.updatedAt || "") !== localApplicationUpdate)) {
-        state.applications = await api("/api/admin/applications");
-        renderApplications();
+      const applicationsChanged = sync.applications && ((canAccessPanel("applications") && (sync.applications.total !== state.applications.length || sync.applications.new !== localNew || (sync.applications.updatedAt || "") !== localApplicationUpdate)) || (canAccessPanel("notifications") && (sync.applications.updatedAt || null) !== state.notificationAudience.applicationsUpdatedAt));
+      if (applicationsChanged) {
+        if (canAccessPanel("applications")) { state.applications = await api("/api/admin/applications"); renderApplications(); }
+        if (canAccessPanel("notifications")) { state.notificationAudience = await api("/api/admin/notification-audience"); renderNotifications(); }
       }
       const localMemberUpdate = state.members.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
-      if (sync.members && (sync.members.total !== state.members.length || (sync.members.updatedAt || "") !== localMemberUpdate)) {
-        state.members = await api("/api/admin/members");
-        if (canAccessPanel("members")) renderMembers();
-        if (canAccessPanel("notifications")) renderNotifications();
+      const membersChanged = sync.members && ((canAccessPanel("members") && (sync.members.total !== state.members.length || (sync.members.updatedAt || "") !== localMemberUpdate)) || (canAccessPanel("notifications") && (sync.members.updatedAt || null) !== state.notificationAudience.membersUpdatedAt));
+      if (membersChanged) {
+        if (canAccessPanel("members")) { state.members = await api("/api/admin/members"); renderMembers(); }
+        if (canAccessPanel("notifications")) { state.notificationAudience = await api("/api/admin/notification-audience"); renderNotifications(); }
       }
-      if (sync.notifications && (sync.notifications.latestAt || "") !== (state.notifications[0]?.sentAt || "") && ["owner", "editor"].includes(state.user.role)) {
+      if (sync.notifications && (sync.notifications.latestId || "") !== (state.notifications[0]?.id || "")) {
         state.notifications = await api("/api/admin/notifications?limit=100");
         renderNotificationHistory();
+      }
+      const localMessageUpdate = state.memberMessages.reduce((latest, thread) => (thread.updatedAt || thread.createdAt || "") > latest ? (thread.updatedAt || thread.createdAt || "") : latest, "");
+      if (sync.memberMessages && (sync.memberMessages.total !== state.memberMessages.length || (sync.memberMessages.updatedAt || "") !== localMessageUpdate)) {
+        state.memberMessages = await api("/api/admin/member-messages?limit=200");
+        renderMemberMessageAdminList();
       }
       const localInventoryUpdate = state.inventory.items.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
       if (sync.inventory && (sync.inventory.updatedAt || "") !== localInventoryUpdate) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
@@ -898,15 +1181,17 @@
 
   async function loadDashboard() {
     const isOwner = state.user?.role === "owner";
-    const [content, applications, mail, audit, managers, members, resourceSecrets, notifications, inventory, funds, usageRequests] = await Promise.all([
+    const [content, applications, mail, audit, managers, members, notificationAudience, resourceSecrets, notifications, memberMessages, inventory, funds, usageRequests] = await Promise.all([
       api("/api/admin/content"),
       canAccessPanel("applications") ? api("/api/admin/applications") : Promise.resolve([]),
       canAccessPanel("mail") ? api("/api/admin/mail") : Promise.resolve(null),
       canAccessPanel("audit") ? api("/api/admin/audit?limit=200") : Promise.resolve([]),
       isOwner ? api("/api/admin/managers") : Promise.resolve([]),
-      canAccessPanel("members") || canAccessPanel("notifications") ? api("/api/admin/members") : Promise.resolve([]),
+      canAccessPanel("members") ? api("/api/admin/members") : Promise.resolve([]),
+      canAccessPanel("notifications") ? api("/api/admin/notification-audience") : Promise.resolve({ members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }),
       canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? api("/api/admin/resource-secrets") : Promise.resolve({}),
       canAccessPanel("notifications") ? api("/api/admin/notifications?limit=100") : Promise.resolve([]),
+      canAccessPanel("notifications") ? api("/api/admin/member-messages?limit=200") : Promise.resolve([]),
       canAccessPanel("inventory") ? api("/api/admin/inventory") : Promise.resolve({ items: [], ledger: [] }),
       canAccessPanel("funds") ? api("/api/admin/funds") : Promise.resolve({ accounts: [], ledger: [] }),
       canAccessPanel("usage") ? api("/api/admin/usage-requests") : Promise.resolve([])
@@ -917,8 +1202,10 @@
     state.audit = audit;
     state.managers = managers;
     state.members = members;
+    state.notificationAudience = notificationAudience;
     state.resourceSecrets = resourceSecrets;
     state.notifications = notifications;
+    state.memberMessages = memberMessages;
     state.inventory = inventory;
     state.funds = funds;
     state.usageRequests = usageRequests;
@@ -964,14 +1251,22 @@
   document.querySelector("#adminProjectCategory").addEventListener("change", filterProjectEditor);
   document.querySelector("#addProject").addEventListener("click", () => { state.content = collectContent(); state.content.projects.push({ id: "", title: "新项目", category: "未分类", description: "", tags: [], color: "#b8ff3d", video: "", poster: "", links: [] }); document.querySelector("#adminProjectSearch").value = ""; document.querySelector("#adminProjectCategory").value = ""; renderProjects(); });
   document.querySelector("#addDepartment").addEventListener("click", () => { state.content = collectContent(); state.content.departments.push({ id: "", name: "新部门", description: "", isOpen: true }); renderDepartments(); });
-  document.querySelector("#addResource").addEventListener("click", () => { state.content = collectContent(); state.content.resources.push({ id: "", title: "新资源", description: "", type: "WEBSITE", url: "", accessNote: "", permissionKey: "", accessSecret: "" }); renderResources(); });
-  document.querySelector("#refreshApplications").addEventListener("click", async () => { state.applications = await api("/api/admin/applications"); renderApplications(); });
-  document.querySelector("#refreshUsageRequests").addEventListener("click", async () => { state.usageRequests = await api("/api/admin/usage-requests"); renderUsageRequests(); });
-  document.querySelector("#refreshAudit").addEventListener("click", async () => { state.audit = await api("/api/admin/audit?limit=200"); renderAudit(); });
-  document.querySelector("#syncButton").addEventListener("click", async () => {
+  document.querySelector("#addResource").addEventListener("click", () => { state.content = collectContent(); state.content.resources.push({ id: "", title: "新资源", description: "", type: "WEBSITE", url: "", links: [], accessNote: "", permissionKey: "", accessSecret: "", children: [] }); renderResources(); });
+  document.querySelector("#refreshApplications").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.applications = await api("/api/admin/applications"); }, renderApplications, "APPLICATIONS REFRESHED"));
+  document.querySelector("#refreshUsageRequests").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.usageRequests = await api("/api/admin/usage-requests"); }, renderUsageRequests, "USAGE REQUESTS REFRESHED"));
+  document.querySelector("#refreshAudit").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.audit = await api("/api/admin/audit?limit=200"); }, renderAudit, "AUDIT LOG REFRESHED"));
+  document.querySelector("#syncButton").addEventListener("click", async (event) => {
     if (!window.confirm("同步会重新读取服务器内容，尚未保存的本地修改会丢失。继续？")) return;
-    await loadDashboard();
-    setStatus("SYNC COMPLETE");
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await loadDashboard();
+      setStatus("SYNC COMPLETE");
+    } catch (error) {
+      setStatus(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
   });
   document.querySelector("#logoutButton").addEventListener("click", async () => { await api("/api/admin/logout", { method: "POST", body: "{}" }); window.location.assign("/portal.html?type=admin"); });
 
@@ -1005,8 +1300,9 @@
       const payload = await api("/api/admin/members", { method: "POST", body: JSON.stringify(values) });
       state.members.push(payload.member);
       renderMembers();
+      if (state.user.role === "owner") renderManagerFormAccess();
       form.reset();
-      message.textContent = "MEMBER CREATED";
+      message.textContent = `MEMBER CREATED / ${payload.member.username} / 激活码 ${payload.activationCode}${payload.activationNotified ? " / 已发送邮箱" : " / 请转交成员"}`;
     } catch (error) { message.textContent = error.message; }
   });
 
@@ -1037,10 +1333,12 @@
     const button = form.querySelector('button[type="submit"]');
     const audience = {
       allMembers: form.elements.allMembers.checked,
+      allApplicants: form.elements.allApplicants.checked,
       includeManagers: form.elements.includeManagers.checked,
       includeDefaultRecipients: form.elements.includeDefaultRecipients.checked,
       departmentIds: [...form.querySelectorAll('[name="departmentIds"]:checked')].map((input) => input.value),
       memberIds: [...form.querySelectorAll('[name="memberIds"]:checked')].map((input) => input.value),
+      applicationIds: [...form.querySelectorAll('[name="applicationIds"]:checked')].map((input) => input.value),
       permissionKeys: form.elements.permissionKeys.value.split(",").map((item) => item.trim()).filter(Boolean),
       customEmails: form.elements.customEmails.value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean)
     };
@@ -1088,7 +1386,15 @@
           senderName: document.querySelector("#mailSenderName").value,
           replyTo: document.querySelector("#mailReplyTo").value,
           recipients: document.querySelector("#mailRecipients").value.split(/[\n,;]+/).map((email) => email.trim()).filter(Boolean),
-          applicationRecipientAdminIds: [...document.querySelectorAll("#applicationRecipientManagers input:checked")].map((input) => input.value)
+          applicationRecipientAdminIds: [...document.querySelectorAll("#applicationRecipientManagers input:checked")].map((input) => input.value),
+          usageApprovedSubject: document.querySelector("#usageApprovedSubject").value,
+          usageApprovedBody: document.querySelector("#usageApprovedBody").value,
+          usageRejectedSubject: document.querySelector("#usageRejectedSubject").value,
+          usageRejectedBody: document.querySelector("#usageRejectedBody").value,
+          applicationAcceptedSubject: document.querySelector("#applicationAcceptedSubject").value,
+          applicationAcceptedBody: document.querySelector("#applicationAcceptedBody").value,
+          applicationRejectedSubject: document.querySelector("#applicationRejectedSubject").value,
+          applicationRejectedBody: document.querySelector("#applicationRejectedBody").value
         })
       });
       document.querySelector("#mailAuthCode").value = "";

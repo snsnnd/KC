@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="description" content="申请加入科技创新社"><title>加入科技创新社 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=5"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="description" content="申请加入科技创新社"><title>加入科技创新社 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=6"></head>
 <body>
   <header class="sub-header"><a class="sub-brand" href="/"><i></i><span>TECH SYNERGY LAB</span></a><a href="/">← RETURN TO SYSTEM</a></header>
   <main>
@@ -10,20 +10,20 @@
       <div class="department-grid" id="departmentList"><p>LOADING MODULES...</p></div>
       <div class="section-title"><div><span class="sub-kicker">// INPUT PROFILE</span><h2>提交申请</h2></div><p>STEP 02 / 02</p></div>
       <form class="application-form" id="applicationForm">
-        <label class="form-field">姓名<input name="name" maxlength="40" autocomplete="name" required></label>
+        <label class="form-field">姓名<input name="name" minlength="2" maxlength="40" autocomplete="name" required></label>
         <label class="form-field">学号<input name="studentId" minlength="4" maxlength="30" autocomplete="off" required></label>
         <label class="form-field">班级<input name="className" minlength="2" maxlength="60" placeholder="例如：计算机 2401 班" autocomplete="organization-title" required></label>
-        <label class="form-field">联系方式<input name="contact" maxlength="80" placeholder="微信或手机号" required></label>
+        <label class="form-field">联系方式<input name="contact" minlength="3" maxlength="80" placeholder="微信或手机号" required></label>
         <label class="form-field">邮箱<input name="email" type="email" maxlength="120" autocomplete="email"></label>
         <label class="form-field form-field--wide">作品链接（可选）<input name="portfolio" type="url" maxlength="1000" placeholder="https://..."></label>
         <label class="form-field form-field--wide">为什么想加入？<textarea name="motivation" minlength="10" maxlength="1200" required></textarea></label>
         <label class="form-field form-field--trap" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
-        <label class="consent"><input type="checkbox" required><span>我同意管理者仅将以上信息用于社团招新联系与审核。</span></label>
+        <label class="consent"><input name="consent" type="checkbox" value="accepted" required><span>我同意管理者仅将以上信息用于社团招新联系与审核。</span></label>
         <button class="submit-button" type="submit">TRANSMIT APPLICATION <span>→</span></button>
         <p class="form-status" id="formStatus" role="status"></p>
       </form>
     </section>
   </main>
   <div class="orientation-guard"><div><i></i>ROTATE DEVICE<br>请使用竖屏获得最佳体验</div></div>
-  <script src="assets/js/join.js?v=3"></script>
+  <script src="assets/js/join.js?v=4"></script>
 </body></html>

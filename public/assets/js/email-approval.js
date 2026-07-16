@@ -1,6 +1,7 @@
 (function () {
   "use strict";
   const hash = new URLSearchParams(window.location.hash.slice(1));
+  const approvalKind = hash.get("kind") === "application" ? "application" : "usage";
   let token = hash.get("token") || "";
   window.history.replaceState(null, "", window.location.pathname);
   const loading = document.querySelector("#approvalLoading");
@@ -30,16 +31,20 @@
   }
 
   function renderApproval() {
-    const isApprove = approval.action === "approved";
+    const isApplication = approval.kind === "application";
+    const isApprove = ["approved", "accepted"].includes(approval.action);
     document.querySelector("#approvalAction").textContent = isApprove ? "[ ACTION / APPROVE ]" : "[ ACTION / REJECT ]";
     document.querySelector("#approvalAction").classList.toggle("is-reject", !isApprove);
-    document.querySelector("#approvalTitle").textContent = isApprove ? "确认批准此申请" : "确认拒绝此申请";
+    document.querySelector("#approvalTitle").textContent = isApprove ? `确认通过此${isApplication ? "加入" : "使用"}申请` : `确认拒绝此${isApplication ? "加入" : "使用"}申请`;
     document.querySelector("#approvalRequestId").textContent = approval.requestId;
     document.querySelector("#approvalApplicant").textContent = approval.applicantName;
     document.querySelector("#approvalDepartment").textContent = approval.departmentName;
     document.querySelector("#approvalTarget").textContent = approval.targetName;
     document.querySelector("#approvalValue").textContent = approval.value;
     document.querySelector("#approvalPurpose").textContent = approval.purpose;
+    document.querySelector("#approvalTargetLabel").textContent = isApplication ? "申请事项" : "材料 / 账户";
+    document.querySelector("#approvalValueLabel").textContent = isApplication ? "学号 / 班级" : "数量 / 金额";
+    document.querySelector("#approvalPurposeLabel").textContent = isApplication ? "申请理由" : "使用目的";
     document.querySelector("#approvalApprover").textContent = approval.approverName;
     document.querySelector("#approvalExpires").textContent = new Date(approval.expiresAt).toLocaleString("zh-CN");
     document.querySelector("#approvalConfirmText").textContent = isApprove ? "确认批准并执行" : "确认拒绝申请";
@@ -54,7 +59,7 @@
       return;
     }
     try {
-      const payload = await request("/api/email-approvals/preview", { token });
+      const payload = await request(approvalKind === "application" ? "/api/application-email-approvals/preview" : "/api/email-approvals/preview", { token });
       approval = payload.approval;
       renderApproval();
     } catch (error) {
@@ -68,9 +73,9 @@
     button.disabled = true;
     status.textContent = "PROCESSING / 正在执行审批...";
     try {
-      const payload = await request("/api/email-approvals/confirm", { token, reviewNote: document.querySelector("#approvalNote").value });
+      const payload = await request(approvalKind === "application" ? "/api/application-email-approvals/confirm" : "/api/email-approvals/confirm", { token, reviewNote: document.querySelector("#approvalNote").value });
       token = "";
-      showResult(payload.request.status === "approved" ? "申请已批准" : "申请已拒绝", `申请 ${payload.request.id} 已由 ${payload.request.reviewedBy} 通过邮件确认处理。`, true);
+      showResult(["approved", "accepted"].includes(payload.request.status) ? "申请已通过" : "申请已拒绝", `申请 ${payload.request.id} 已由 ${payload.request.reviewedBy} 通过邮件确认处理。${payload.notified ? "结果邮件已发送给申请人。" : "申请人未配置邮箱或邮件发送失败。"}`, true);
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;

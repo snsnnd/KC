@@ -40,31 +40,65 @@ try {
   const ownerHeaders = { cookie: owner.cookie, "content-type": "application/json", "x-csrf-token": owner.csrf };
   const mail = await request("/api/admin/mail", { headers: { cookie: owner.cookie } });
   assert.deepEqual(mail.body.applicationRecipientAdminIds, [owner.user.id]);
+  assert.ok(mail.body.usageApprovedSubject.includes("{申请编号}"));
+  assert.ok(mail.body.usageRejectedBody.includes("{审批意见}"));
+  assert.ok(mail.body.applicationAcceptedSubject.includes("{申请编号}"));
+  assert.ok(mail.body.applicationRejectedBody.includes("{审批意见}"));
 
   const applications = [];
   for (const [departmentId, studentId] of [["software", "20260011"], ["hardware", "20260012"]]) {
-    const application = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `${departmentId} applicant`, studentId, className: "测试班级", contact: "test-contact", departmentId, motivation: "这是满足长度要求的申请理由" }) });
+    const application = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `${departmentId} applicant`, studentId, className: "测试班级", contact: "test-contact", departmentId, motivation: "这是满足长度要求的申请理由", consent: "accepted" }) });
     assert.equal(application.response.status, 201);
     applications.push(application.body.id);
   }
 
-  for (const [username, departmentId] of [["software-member", "software"], ["hardware-member", "hardware"]]) {
-    const member = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ username, password: "member-password", name: username, departmentId, permissions: [] }) });
+  const membersByDepartment = {};
+  for (const [departmentId, studentId] of [["software", "20263001"], ["hardware", "20263002"]]) {
+    const member = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: `${departmentId} member`, studentId, departmentId, permissions: [] }) });
     assert.equal(member.response.status, 201);
+    membersByDepartment[departmentId] = member.body;
   }
 
-  const createdManager = await request("/api/admin/managers", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ username: "software-manager", password: scopedPassword, displayName: "软件部门管理员", role: "editor", panelPermissions: ["applications", "members"], departmentIds: ["software"] }) });
+  const prematureManager = await request("/api/admin/managers", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ memberId: membersByDepartment.software.member.id, role: "editor", panelPermissions: ["applications", "members"], departmentIds: ["software"] }) });
+  assert.equal(prematureManager.response.status, 409);
+
+  const softwareActivation = await request("/api/member/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.software.member.username, activationCode: membersByDepartment.software.activationCode, nextPassword: scopedPassword }) });
+  assert.equal(softwareActivation.response.status, 200);
+  const hardwarePassword = "hardware-member-password";
+  const hardwareActivation = await request("/api/member/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.hardware.member.username, activationCode: membersByDepartment.hardware.activationCode, nextPassword: hardwarePassword }) });
+  assert.equal(hardwareActivation.response.status, 200);
+  const noAdminAccess = await request("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.hardware.member.username, password: hardwarePassword }) });
+  assert.equal(noAdminAccess.response.status, 403);
+
+  const createdManager = await request("/api/admin/managers", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ memberId: membersByDepartment.software.member.id, role: "editor", panelPermissions: ["applications", "members"], departmentIds: ["software"] }) });
   assert.equal(createdManager.response.status, 201);
   const managerId = createdManager.body.manager.id;
 
-  const scoped = await login("software-manager", scopedPassword);
+  const scoped = await login(membersByDepartment.software.member.username, scopedPassword);
   const scopedHeaders = { cookie: scoped.cookie, "content-type": "application/json", "x-csrf-token": scoped.csrf };
-  assert.deepEqual(scoped.user.panelPermissions.sort(), ["applications", "members"]);
+  assert.deepEqual(scoped.user.panelPermissions.sort(), ["applications", "members", "notifications"]);
   assert.deepEqual(scoped.user.departmentIds, ["software"]);
+  const linkedIdentityUpdate = await request(`/api/admin/members/${membersByDepartment.software.member.id}`, { method: "PATCH", headers: scopedHeaders, body: JSON.stringify({ status: "suspended" }) });
+  assert.equal(linkedIdentityUpdate.response.status, 403);
+
+  const softwareMemberLogin = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.software.member.username, password: scopedPassword }) });
+  const softwareMemberCookie = softwareMemberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
+  const softwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: softwareMemberCookie, "content-type": "application/json" }, body: JSON.stringify({ subject: "软件部问询", message: "软件部管理员应该可以看到" }) });
+  assert.equal(softwareQuestion.response.status, 201);
+  const hardwareMemberLogin = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.hardware.member.username, password: hardwarePassword }) });
+  const hardwareMemberCookie = hardwareMemberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
+  const hardwareQuestion = await request("/api/member/messages", { method: "POST", headers: { cookie: hardwareMemberCookie, "content-type": "application/json" }, body: JSON.stringify({ subject: "硬件部问询", message: "软件部管理员不应该看到" }) });
+  assert.equal(hardwareQuestion.response.status, 201);
+  const scopedMessages = await request("/api/admin/member-messages", { headers: { cookie: scoped.cookie } });
+  assert.deepEqual(scopedMessages.body.map((thread) => thread.id), [softwareQuestion.body.thread.id]);
+  const crossDepartmentReply = await request(`/api/admin/member-messages/${hardwareQuestion.body.thread.id}/replies`, { method: "POST", headers: scopedHeaders, body: JSON.stringify({ message: "越权回复" }) });
+  assert.equal(crossDepartmentReply.response.status, 404);
 
   const visibleApplications = await request("/api/admin/applications", { headers: { cookie: scoped.cookie } });
   assert.equal(visibleApplications.body.length, 1);
   assert.equal(visibleApplications.body[0].departmentId, "software");
+  const notificationAccess = await request("/api/admin/notifications", { headers: { cookie: scoped.cookie } });
+  assert.equal(notificationAccess.response.status, 200);
   const visibleMembers = await request("/api/admin/members", { headers: { cookie: scoped.cookie } });
   assert.equal(visibleMembers.body.length, 1);
   assert.equal(visibleMembers.body[0].departmentId, "software");
@@ -83,17 +117,23 @@ try {
   const crossDepartmentReview = await request(`/api/admin/applications/${hardwareApplicationId}`, { method: "PATCH", headers: scopedHeaders, body: JSON.stringify({ status: "reviewing" }) });
   assert.equal(crossDepartmentReview.response.status, 404);
 
-  const scopedMember = await request("/api/admin/members", { method: "POST", headers: scopedHeaders, body: JSON.stringify({ username: "scoped-created", password: "member-password", name: "范围内成员", departmentId: "software", permissions: [] }) });
+  const scopedMember = await request("/api/admin/members", { method: "POST", headers: scopedHeaders, body: JSON.stringify({ name: "范围内成员", studentId: "20263003", departmentId: "software", permissions: [] }) });
   assert.equal(scopedMember.response.status, 201);
-  const foreignMember = await request("/api/admin/members", { method: "POST", headers: scopedHeaders, body: JSON.stringify({ username: "foreign-created", password: "member-password", name: "范围外成员", departmentId: "hardware", permissions: [] }) });
+  const foreignMember = await request("/api/admin/members", { method: "POST", headers: scopedHeaders, body: JSON.stringify({ name: "范围外成员", studentId: "20263004", departmentId: "hardware", permissions: [] }) });
   assert.equal(foreignMember.response.status, 404);
 
   const revoked = await request(`/api/admin/managers/${managerId}`, { method: "PATCH", headers: ownerHeaders, body: JSON.stringify({ role: "editor", panelPermissions: ["members"], departmentIds: ["software"] }) });
   assert.equal(revoked.response.status, 200);
   const revokedApplications = await request("/api/admin/applications", { headers: { cookie: scoped.cookie } });
   assert.equal(revokedApplications.response.status, 403);
+  const notificationAudience = await request("/api/admin/notification-audience", { headers: { cookie: scoped.cookie } });
+  assert.equal(notificationAudience.response.status, 200);
+  assert.ok(notificationAudience.body.applicants.every((application) => application.departmentId === "software"));
+  assert.ok(notificationAudience.body.applicants.every((application) => application.motivation === undefined && application.contact === undefined && application.studentId === undefined));
+  const revokedApplicationReview = await request(`/api/admin/applications/${softwareApplication.id}`, { method: "PATCH", headers: scopedHeaders, body: JSON.stringify({ status: "reviewing" }) });
+  assert.equal(revokedApplicationReview.response.status, 403);
   const sync = await request("/api/admin/sync", { headers: { cookie: scoped.cookie } });
-  assert.deepEqual(sync.body.user.panelPermissions, ["members"]);
+  assert.deepEqual(sync.body.user.panelPermissions.sort(), ["members", "notifications"]);
 
   console.log(JSON.stringify({ ok: true, moduleIsolation: true, departmentIsolation: true, revocationImmediate: true }));
 } finally {

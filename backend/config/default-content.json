@@ -52,12 +52,12 @@
     }
   ],
   "departments": [
-    { "id": "software", "name": "软件与算法部", "description": "Web、嵌入式、计算机视觉与人工智能。", "isOpen": true },
-    { "id": "hardware", "name": "硬件与机械部", "description": "电路、PCB、结构设计、制造与运动控制。", "isOpen": true },
-    { "id": "product", "name": "产品与运营部", "description": "产品设计、视觉表达、活动策划与项目传播。", "isOpen": true }
+    { "id": "software", "name": "软件与算法部", "accountPrefix": "S", "description": "Web、嵌入式、计算机视觉与人工智能。", "isOpen": true },
+    { "id": "hardware", "name": "硬件与机械部", "accountPrefix": "H", "description": "电路、PCB、结构设计、制造与运动控制。", "isOpen": true },
+    { "id": "product", "name": "产品与运营部", "accountPrefix": "P", "description": "产品设计、视觉表达、活动策划与项目传播。", "isOpen": true }
   ],
   "resources": [
-    { "id": "starter-kit", "title": "新成员入门资料", "description": "开发环境、基础工具链和社团协作规范。", "type": "BAIDU NETDISK", "url": "", "accessNote": "链接由管理员配置", "permissionKey": "resource.basic" },
-    { "id": "source-index", "title": "开源项目索引", "description": "社团公开项目的源码、文档和版本记录。", "type": "SOURCE CODE", "url": "", "accessNote": "链接由管理员配置", "permissionKey": "" }
+    { "id": "starter-kit", "title": "新成员入门资料", "description": "开发环境、基础工具链和社团协作规范。", "type": "BAIDU NETDISK", "url": "", "links": [], "accessNote": "链接由管理员配置", "permissionKey": "resource.basic", "children": [] },
+    { "id": "source-index", "title": "开源项目索引", "description": "社团公开项目的源码、文档和版本记录。", "type": "SOURCE CODE", "url": "", "links": [], "accessNote": "链接由管理员配置", "permissionKey": "", "children": [] }
   ]
 }

@@ -76,22 +76,46 @@ try {
     method: "POST",
     headers: adminHeaders,
     body: JSON.stringify({
-      username: "resource-test-member",
-      password: memberPassword,
       name: "资源审批测试成员",
+      studentId: "20261001",
+      departmentId: "software",
       permissions: ["material.request", "fund.request"]
     })
   });
   assert.equal(member.response.status, 201);
 
-  const memberLogin = await jsonRequest("/api/member/login", {
+  const preActivationLogin = await jsonRequest("/api/member/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "resource-test-member", password: memberPassword })
+    body: JSON.stringify({ username: member.body.member.username, password: memberPassword })
   });
+  assert.equal(preActivationLogin.response.status, 403);
+  const activation = await jsonRequest("/api/member/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: member.body.member.username, activationCode: member.body.activationCode, nextPassword: memberPassword }) });
+  assert.equal(activation.response.status, 200);
+  const memberLogin = await jsonRequest("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: member.body.member.username, password: memberPassword }) });
   assert.equal(memberLogin.response.status, 200);
   const memberCookie = memberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];
   const memberHeaders = { cookie: memberCookie, "content-type": "application/json" };
+  assert.equal(memberLogin.body.member.mustChangePassword, false);
+
+  const question = await jsonRequest("/api/member/messages", { method: "POST", headers: memberHeaders, body: JSON.stringify({ subject: "测试问询", message: "请管理员回复这条测试问题" }) });
+  assert.equal(question.response.status, 201);
+  const adminMessages = await jsonRequest("/api/admin/member-messages", { headers: { cookie: adminCookie } });
+  assert.ok(adminMessages.body.some((thread) => thread.id === question.body.thread.id));
+  const reply = await jsonRequest(`/api/admin/member-messages/${question.body.thread.id}/replies`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ message: "管理员测试回复", close: true }) });
+  assert.equal(reply.response.status, 200);
+  const memberMessages = await jsonRequest("/api/member/messages", { headers: { cookie: memberCookie } });
+  const repliedThread = memberMessages.body.find((thread) => thread.id === question.body.thread.id);
+  assert.equal(repliedThread.status, "closed");
+  assert.equal(repliedThread.replies[0].message, "管理员测试回复");
+  const closedReply = await jsonRequest(`/api/admin/member-messages/${question.body.thread.id}/replies`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ message: "不应写入的追加回复" }) });
+  assert.equal(closedReply.response.status, 409);
+  const memberFollowUp = await jsonRequest(`/api/member/messages/${question.body.thread.id}/replies`, { method: "POST", headers: memberHeaders, body: JSON.stringify({ message: "成员继续补充并重新打开问询" }) });
+  assert.equal(memberFollowUp.response.status, 200);
+  assert.equal(memberFollowUp.body.thread.status, "open");
+  const followUpReply = await jsonRequest(`/api/admin/member-messages/${question.body.thread.id}/replies`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ message: "管理员继续回复" }) });
+  assert.equal(followUpReply.response.status, 200);
+  assert.equal(followUpReply.body.thread.replies.at(-1).message, "管理员继续回复");
 
   const materialRequest = await jsonRequest("/api/member/usage-requests", {
     method: "POST",
@@ -134,6 +158,16 @@ try {
   assert.equal(inventory.body.ledger.filter((entry) => entry.requestId === materialRequest.body.request.id).length, 1);
   assert.equal(funds.body.ledger.filter((entry) => entry.requestId === fundRequest.body.request.id).length, 1);
 
+  const archivedFund = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "archived" }) });
+  assert.equal(archivedFund.response.status, 200);
+  assert.equal(archivedFund.body.account.status, "archived");
+  let memberManagement = await jsonRequest("/api/member/resource-management", { headers: { cookie: memberCookie } });
+  assert.equal(memberManagement.body.funds.some((account) => account.id === fund.body.account.id), false);
+  const reactivatedFund = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "active" }) });
+  assert.equal(reactivatedFund.response.status, 200);
+  memberManagement = await jsonRequest("/api/member/resource-management", { headers: { cookie: memberCookie } });
+  assert.equal(memberManagement.body.funds.some((account) => account.id === fund.body.account.id), true);
+
   const excessiveRequest = await jsonRequest("/api/member/usage-requests", {
     method: "POST",
     headers: memberHeaders,
@@ -150,13 +184,49 @@ try {
   inventory = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
   assert.equal(inventory.body.items.find((item) => item.id === material.body.item.id).quantity, 7);
 
+  const blockedDelete = await jsonRequest(`/api/admin/inventory/${material.body.item.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  assert.equal(blockedDelete.response.status, 409);
+  const disposable = await jsonRequest("/api/admin/inventory", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "待删除测试材料", unit: "件", quantity: 2 }) });
+  assert.equal(disposable.response.status, 201);
+  const deleted = await jsonRequest(`/api/admin/inventory/${disposable.body.item.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  assert.equal(deleted.response.status, 200);
+  inventory = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
+  assert.equal(inventory.body.items.some((item) => item.id === disposable.body.item.id), false);
+  assert.ok(inventory.body.ledger.some((entry) => entry.itemId === disposable.body.item.id && entry.direction === "out" && entry.quantity === 2));
+
+  const pendingFundRequest = await jsonRequest("/api/member/usage-requests", { method: "POST", headers: memberHeaders, body: JSON.stringify({ type: "fund", targetId: fund.body.account.id, amount: 20, purpose: "验证待审批资金阻止删除" }) });
+  assert.equal(pendingFundRequest.response.status, 201);
+  const blockedFundDelete = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  assert.equal(blockedFundDelete.response.status, 409);
+  const disposableFund = await jsonRequest("/api/admin/funds", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "待删除测试资金", currency: "CNY", balance: 50 }) });
+  assert.equal(disposableFund.response.status, 201);
+  const deletedFund = await jsonRequest(`/api/admin/funds/${disposableFund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" });
+  assert.equal(deletedFund.response.status, 200);
+  funds = await jsonRequest("/api/admin/funds", { headers: { cookie: adminCookie } });
+  assert.equal(funds.body.accounts.some((account) => account.id === disposableFund.body.account.id), false);
+  assert.ok(funds.body.ledger.some((entry) => entry.accountId === disposableFund.body.account.id && entry.direction === "out" && entry.amount === 50));
+
+  const raceFund = await jsonRequest("/api/admin/funds", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "并发删除测试资金", currency: "CNY", balance: 25 }) });
+  assert.equal(raceFund.response.status, 201);
+  const [racingRequest, racingDelete] = await Promise.all([
+    jsonRequest("/api/member/usage-requests", { method: "POST", headers: memberHeaders, body: JSON.stringify({ type: "fund", targetId: raceFund.body.account.id, amount: 5, purpose: "并发申请与删除原子性验证" }) }),
+    jsonRequest(`/api/admin/funds/${raceFund.body.account.id}`, { method: "DELETE", headers: adminHeaders, body: "{}" })
+  ]);
+  assert.ok((racingRequest.response.status === 201 && racingDelete.response.status === 409) || (racingRequest.response.status === 400 && racingDelete.response.status === 200));
+
   console.log(JSON.stringify({
     ok: true,
     pendingDidNotDeduct: true,
     materialQuantity: 7,
     fundBalance: 800,
     concurrentApprovalStatuses: concurrentApprovals.map(({ response }) => response.status).sort(),
-    insufficientInventoryStatus: excessiveApproval.response.status
+    insufficientInventoryStatus: excessiveApproval.response.status,
+    pendingDeleteBlocked: true,
+    inventoryDeletePreservedLedger: true,
+    fundArchiveLifecycle: true,
+    fundDeletePreservedLedger: true,
+    fundRequestDeleteAtomic: true,
+    memberAdminMessaging: true
   }));
 } finally {
   server.kill("SIGTERM");

@@ -18,6 +18,7 @@
       input.type = "radio";
       input.name = "departmentId";
       input.value = department.id;
+      input.setAttribute("form", form.id);
       input.required = true;
       if (index === 0) input.checked = true;
       const code = document.createElement("span");
