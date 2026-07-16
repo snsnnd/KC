@@ -60,7 +60,7 @@ const memberSessions = new Map();
 const rateBuckets = new Map();
 let writeQueue = Promise.resolve();
 let resourceOperationQueue = Promise.resolve();
-let auditEntries = readJson(auditFile);
+let auditEntries = readJson(auditFile).slice(0, 5000);
 
 setInterval(() => {
   const now = Date.now();
@@ -70,7 +70,14 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    console.error(`readJson failed for ${file}: ${error.message}`);
+    const text = String(fs.readFileSync(file, "utf8"));
+    if (!text || text === "null") return {};
+    return [];
+  }
 }
 
 function writeJson(file, value) {
@@ -79,13 +86,19 @@ function writeJson(file, value) {
     await fs.promises.writeFile(temporaryFile, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
     await fs.promises.rename(temporaryFile, file);
   });
+  run.catch((error) => { console.error(`writeJson failed for ${file}: ${error.message}`); queueError = error; });
   writeQueue = run;
   return run;
 }
 
+let queueError = null;
+
 function withResourceLock(operation) {
   const run = resourceOperationQueue.then(operation);
-  resourceOperationQueue = run.catch(() => {});
+  resourceOperationQueue = run.catch((error) => {
+    console.error(`resourceOperationQueue error: ${error.message}`);
+    queueError = error;
+  });
   return run;
 }
 
@@ -1084,7 +1097,7 @@ app.use((request, response, next) => {
 app.get("/api/health", (request, response) => {
   const rateLimit = consumeRateLimits([{ key: `health:${request.ip}`, limit: 120, interval: 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) { response.set("Retry-After", String(rateLimit.retryAfter)); return response.status(429).json({ error: "请求过于频繁" }); }
-  response.json({ ok: true, mail: Boolean(mailer) });
+  response.json({ ok: true, mail: Boolean(mailer), writeHealthy: !queueError });
 });
 app.get("/api/content", (request, response) => {
   const rateLimit = consumeRateLimits([{ key: `content:${request.ip}`, limit: 60, interval: 60 * 1000, scope: "network" }]);
