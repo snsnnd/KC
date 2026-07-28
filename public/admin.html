@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex,nofollow">
   <meta name="theme-color" content="#08080a">
   <title>TSL Control | 内容管理</title>
-  <link rel="stylesheet" href="assets/css/admin.css?v=10">
+  <link rel="stylesheet" href="assets/css/admin.css?v=17">
 </head>
 <body>
   <main class="login-shell" id="loginView">
@@ -32,11 +32,12 @@
       <p class="admin-nav__context" id="workspaceContext">SELECT WORKSPACE</p>
       <button data-workspace="operations" data-panel="settings" type="button"><span>01</span>基础信息</button>
       <button data-workspace="operations" data-panel="projects" type="button"><span>02</span>项目内容</button>
-      <button data-workspace="people" data-panel="departments" type="button"><span>03</span>招新部门</button>
+      <button data-workspace="operations" data-panel="project-workspaces" type="button"><span>03</span>项目协作</button>
+      <button data-workspace="people" data-panel="departments" type="button"><span>04</span>招新部门</button>
       <button data-workspace="assets" data-panel="resources" type="button"><span>04</span>资源链接</button>
       <button data-workspace="people" data-panel="applications" type="button"><span>05</span>申请收件箱 <i id="applicationBadge">0</i></button>
       <button data-workspace="operations" data-panel="mail" type="button"><span>06</span>邮件通知</button>
-      <button data-workspace="operations" data-panel="notifications" type="button"><span>07</span>通知中心</button>
+      <button data-workspace="notifications" data-panel="notifications" type="button"><span>07</span>通知中心</button>
       <button data-workspace="operations" data-panel="uploads" type="button"><span>08</span>媒体上传</button>
       <button data-workspace="people" data-panel="members" type="button"><span>09</span>人员管理</button>
       <button data-workspace="people" data-panel="managers" data-owner-only type="button"><span>10</span>管理员</button>
@@ -49,9 +50,10 @@
       <section class="admin-panel is-active" data-panel-view="workspace">
         <div class="workspace-hero"><div><p>// CONTROL PLANE DIRECTORY</p><h1>选择子后台</h1></div><span>仅显示主管理员分配的管理模块和负责部门</span></div>
         <div class="workspace-grid">
-          <a class="workspace-card" data-workspace-card="operations" href="/admin.html?workspace=operations"><span>01 / OPERATIONS</span><h2>运营宣发</h2><p>官网内容、项目展示、媒体上传、邮件通道与定向通知。</p><b>进入运营后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="operations" href="/admin.html?workspace=operations"><span>01 / OPERATIONS</span><h2>运营宣发</h2><p>官网内容、项目展示、媒体上传与邮件通道。</p><b>进入运营后台 →</b></a>
           <a class="workspace-card" data-workspace-card="people" href="/admin.html?workspace=people"><span>02 / PEOPLE</span><h2>人员管理</h2><p>招新部门、申请审核、成员权限、管理员角色与操作审计。</p><b>进入人员后台 →</b></a>
           <a class="workspace-card" data-workspace-card="assets" href="/admin.html?workspace=assets"><span>03 / ASSETS</span><h2>资源与资金</h2><p>受保护资源、物资库存、资金账户和材料资金使用审批。</p><b>进入资源后台 →</b></a>
+          <a class="workspace-card" data-workspace-card="notifications" href="/admin.html?workspace=notifications#notifications"><span>04 / NOTIFICATIONS</span><h2>通知中心</h2><p>各部门通知、成员问询、发送历史与 Bug 反馈集中处理。</p><b>进入通知中心 →</b></a>
         </div>
       </section>
       <section class="admin-panel" data-panel-view="settings">
@@ -62,6 +64,26 @@
         <div class="panel-heading"><div><p>// DEPLOYED SYSTEMS</p><h1>项目内容</h1></div><div><button id="addProject" type="button">+ 添加项目</button><button class="save-button" type="button">保存更改</button></div></div>
         <div class="project-admin-filter"><input id="adminProjectSearch" type="search" placeholder="搜索项目名称、编号、分类或标签"><select id="adminProjectCategory" aria-label="按项目分类筛选"><option value="">全部分类</option></select><output id="adminProjectCount"></output></div>
         <div class="editor-list" id="projectEditor"></div>
+        <div class="section-title-admin"><div><p>// ACHIEVEMENT SHOWCASE</p><h2>成果展示</h2></div><button id="addAchievement" type="button">+ 添加成果</button></div>
+        <div class="editor-list" id="achievementEditor"></div>
+      </section>
+      <section class="admin-panel" data-panel-view="project-workspaces">
+        <div class="panel-heading"><div><p>// INTEGRATED PROJECT OPERATIONS</p><h1>项目协作</h1></div><button id="refreshProjectWorkspaces" type="button">刷新工作区</button></div>
+        <form class="project-workspace-form" id="projectWorkspaceForm">
+          <input name="id" type="hidden">
+          <input name="revision" type="hidden" value="0">
+          <label class="field">工作区名称<input name="name" minlength="2" maxlength="120" required></label>
+          <label class="field">关联公开项目<select name="projectId" id="projectWorkspaceProject"><option value="">不关联公开项目</option></select></label>
+          <label class="field field--wide">项目说明<textarea name="description" maxlength="2000"></textarea></label>
+          <label class="field">状态<select name="status"><option value="planning">筹备中</option><option value="active">进行中</option><option value="paused">已暂停</option><option value="completed">已完成</option></select></label>
+          <label class="field">自动进度<output id="projectWorkspaceAutoProgress">0%（按已完成任务计算）</output></label>
+          <label class="field project-workspace-select">项目成员<select name="memberIds" id="projectWorkspaceMembers" multiple size="7" required></select><small>桌面可 Ctrl / Command 多选，移动端直接逐项点选</small></label>
+          <label class="field project-workspace-select">项目负责人<select name="managerIds" id="projectWorkspaceLeaders" multiple size="7" required></select><small>负责人必须属于项目成员；桌面可 Ctrl / Command 多选，移动端直接逐项点选</small></label>
+          <fieldset class="project-allocation-editor field--wide"><legend>项目配额</legend><div id="projectAllocationRows"></div><button id="addProjectAllocation" class="small-button" type="button">+ 添加配额</button></fieldset>
+          <div class="project-workspace-form__actions"><button type="submit">CREATE WORKSPACE</button><button id="cancelProjectWorkspaceEdit" class="small-button" type="button" hidden>取消编辑</button></div>
+          <p class="form-message" id="projectWorkspaceMessage" role="status"></p>
+        </form>
+        <div class="project-workspace-admin-list" id="projectWorkspaceList"></div>
       </section>
       <section class="admin-panel" data-panel-view="departments">
         <div class="panel-heading"><div><p>// RECRUITMENT CHANNELS</p><h1>招新部门</h1></div><div><button id="addDepartment" type="button">+ 添加部门</button><button class="save-button" type="button">保存更改</button></div></div>
@@ -85,7 +107,7 @@
           <label class="field">回复邮箱<input id="mailReplyTo" type="email" placeholder="回复将发送到该地址"></label>
           <label class="field">默认系统通知邮箱组（逗号或换行分隔）<textarea id="mailRecipients" placeholder="用于普通系统通知，不用于识别申请负责人"></textarea></label>
           <fieldset class="manager-access-field"><legend>申请通知负责人</legend><p>新申请按管理员身份精确投递，不使用匿名邮箱列表。</p><div class="manager-choice-grid" id="applicationRecipientManagers"></div></fieldset>
-          <fieldset class="manager-access-field"><legend>审批结果回信模板</legend><p>支持变量：{申请人}、{申请编号}、{申请类型}、{申请对象}、{数量金额}、{用途}、{结果}、{审批意见}、{审批人}、{审批时间}</p>
+          <fieldset class="manager-access-field"><legend>审批结果回信模板</legend><p>支持变量：{申请人}、{申请编号}、{申请类型}、{申请对象}、{数量金额}、{用途}、{结果}、{领取位置}、{领取提示}、{元器件图片}、{位置图片}、{审批意见}、{审批人}、{审批时间}</p>
             <label class="field">批准邮件主题<input id="usageApprovedSubject" maxlength="200"></label>
             <label class="field field--wide">批准邮件正文<textarea id="usageApprovedBody" maxlength="5000"></textarea></label>
             <label class="field">拒绝邮件主题<input id="usageRejectedSubject" maxlength="200"></label>
@@ -126,7 +148,7 @@
         <div class="notification-history" id="bugReportList"></div>
       </section>
       <section class="admin-panel" data-panel-view="uploads">
-        <div class="panel-heading"><div><p>// MEDIA INGEST</p><h1>媒体上传</h1></div></div>
+        <div class="panel-heading"><div><p>// MEDIA INGEST</p><h1>媒体上传</h1></div><button id="refreshUploads" type="button">刷新文件列表</button></div>
         <div class="upload-panel">
           <p>支持 JPG、PNG、WebP、AVIF、MP4、WebM，单文件最大 100MB。上传后将返回可填入项目 Poster 或 Video 字段的站内地址。</p>
           <input id="mediaFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm">
@@ -134,13 +156,15 @@
           <div class="upload-result"><input id="uploadUrl" readonly placeholder="/uploads/..."><button id="copyUploadUrl" type="button">复制</button></div>
           <p class="form-message" id="uploadMessage" role="status"></p>
         </div>
+        <div class="section-title-admin"><p>// SERVER MEDIA REGISTRY</p><h2>已上传文件</h2></div>
+        <div class="upload-library" id="uploadLibrary"></div>
       </section>
       <section class="admin-panel" data-panel-view="members">
         <div class="panel-heading"><div><p>// MEMBER DIRECTORY &amp; ACL</p><h1>人员管理</h1></div><a href="/member.html" target="_blank">成员中心 ↗</a></div>
         <form class="manager-form" id="memberForm">
           <label class="field">姓名<input name="name" required></label>
           <label class="field">学号<input name="studentId" pattern="[A-Za-z0-9]{4,30}" required></label>
-          <label class="field">班级<input name="className"></label>
+          <label class="field">班级<input name="className" pattern="[0-9]{2}[\u3400-\u4DBF\u4E00-\u9FFF]+[0-9]{2}" maxlength="60" placeholder="例如：24通信01" title="请按“24通信01”填写：两位年份 + 中文专业 + 两位班号"></label>
           <label class="field">邮箱<input name="email" type="email"></label>
           <label class="field">联系方式<input name="contact"></label>
           <label class="field">所属部门<select name="departmentId" id="memberDepartment"></select></label>
@@ -170,8 +194,18 @@
       <section class="admin-panel" data-panel-view="inventory">
         <div class="panel-heading"><div><p>// MATERIAL INVENTORY</p><h1>物资库存</h1></div></div>
         <form class="manager-form" id="inventoryForm" data-inventory-edit>
-          <label class="field">材料名称<input name="name" required></label><label class="field">SKU / 编号<input name="sku"></label><label class="field">分类<input name="category"></label><label class="field">单位<input name="unit" placeholder="个 / 米 / 块" required></label><label class="field">初始数量<input name="quantity" type="number" min="0" step="0.01" value="0"></label><label class="field">单位成本<input name="unitCost" type="number" min="0" step="0.01" value="0"></label><label class="field">存放位置<input name="location"></label><label class="field">备注<input name="notes"></label><button type="submit">CREATE MATERIAL</button><p class="form-message" id="inventoryMessage"></p>
+          <label class="field">材料名称<input name="name" required></label><label class="field">SKU / 编号<input name="sku"></label><label class="field">分类<input name="category"></label><label class="field">单位<input name="unit" placeholder="个 / 米 / 块" required></label><label class="field">初始数量<input name="quantity" type="number" min="0" step="0.01" value="0"></label><label class="field">单位成本<input name="unitCost" type="number" min="0" step="0.01" value="0"></label>
+          <fieldset class="inventory-location-editor"><legend>领取位置（可选；设置时行和列必须同时填写）</legend><label class="field">收纳容器<input name="locationContainer" value="收纳盒" maxlength="80"></label><label class="field">位置标签<input name="locationLabel" placeholder="传感器 / 核心板" maxlength="80"></label><label class="field">行<select name="locationRow"><option value="">不设置</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label><label class="field">列标签 / 编号<input name="locationColumn" placeholder="1 / A / 左侧" maxlength="40"></label></fieldset>
+          <fieldset class="inventory-location-editor"><legend>物资图片（可选，单张不超过 2MB）</legend><label class="field">元器件图片<input name="componentImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"></label><label class="field">领取位置图片<input name="locationImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"></label></fieldset>
+          <label class="field field--wide">备注<input name="notes"></label><button type="submit">CREATE MATERIAL</button><p class="form-message" id="inventoryMessage"></p>
         </form>
+        <form class="inventory-import-panel" id="inventoryImportForm" data-inventory-edit>
+          <div><span>// SPREADSHEET PARSER</span><h2>表格批量导入</h2><p>支持 .xlsx、UTF-8 .csv/.tsv。必填列为“材料名称”和“单位”；位置可填写完整文本“收纳盒的传感器（1，1）”，也可拆分为容器、位置标签、行、列。</p></div>
+          <label class="field">选择库存表格<input id="inventoryImportFile" name="file" type="file" accept=".xlsx,.csv,.tsv" required></label>
+          <div class="inventory-import-actions"><button class="small-button" id="downloadInventoryTemplate" type="button">下载 CSV 模板</button><button class="small-button" id="previewInventoryImport" type="button">解析并预览</button><button id="commitInventoryImport" type="submit" disabled>确认导入</button></div>
+          <p class="form-message" id="inventoryImportMessage" role="status"></p><div class="inventory-import-preview" id="inventoryImportPreview"></div>
+        </form>
+        <div class="inventory-filter" id="inventoryFilter"><input id="inventorySearch" type="search" aria-label="搜索物资名称、SKU、分类或位置标签" placeholder="搜索名称、SKU、分类或位置标签..."><select id="inventoryCategory" aria-label="按物资分类筛选"><option value="">全部分类</option></select><output id="inventoryCount"></output></div>
         <div class="inventory-grid" id="inventoryList"></div>
         <div class="section-title-admin"><p>// MATERIAL LEDGER</p><h2>出入库流水</h2></div><div class="audit-list" id="inventoryLedger"></div>
       </section>
@@ -189,6 +223,6 @@
       </section>
     </main>
   </div>
-  <script src="assets/js/admin.js?v=21"></script>
+  <script src="assets/js/admin.js?v=29"></script>
 </body>
 </html>

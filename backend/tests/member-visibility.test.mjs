@@ -11,7 +11,7 @@ const serverPath = fileURLToPath(new URL("../src/server.js", import.meta.url));
 
 await fs.rm(dataDirectory, { recursive: true, force: true });
 const server = spawn(process.execPath, [serverPath], {
-  env: { ...process.env, PORT: "3103", DATA_DIR: dataDirectory, ADMIN_PASSWORD: adminPassword, SESSION_SECRET: "isolated-member-visibility-secret", COOKIE_SECURE: "false" },
+  env: { ...process.env, PORT: "3103", DATA_DIR: dataDirectory, ADMIN_PASSWORD: adminPassword, SESSION_SECRET: "isolated-member-visibility-secret-at-least-32", COOKIE_SECURE: "false" },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
@@ -52,6 +52,7 @@ try {
   const adminHeaders = { cookie: adminCookie, "content-type": "application/json", "x-csrf-token": login.body.csrf };
 
   const adminContent = await request("/api/admin/content", { headers: { cookie: adminCookie } });
+  assert.ok(adminContent.body.achievements.length >= 1);
   const collection = {
     id: "resource-collection",
     title: "资源大合集",
@@ -72,11 +73,17 @@ try {
   ]);
   assert.deepEqual(concurrentContentSaves.map(({ response }) => response.status).sort(), [200, 409]);
   const latestContent = await request("/api/admin/content", { headers: { cookie: adminCookie } });
+  const excessiveProjects = structuredClone(latestContent.body);
+  excessiveProjects.projects = Array.from({ length: 101 }, (_, index) => ({ id: `LIMIT_${index}`, title: `项目 ${index}`, category: "测试", description: "项目上限验证", tags: [], links: [] }));
+  const excessiveProjectSave = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(excessiveProjects) });
+  assert.equal(excessiveProjectSave.response.status, 400);
+  assert.equal(excessiveProjectSave.body.error, "公开项目最多 100 个");
   const excessiveLinks = structuredClone(latestContent.body);
   excessiveLinks.resources.find((resource) => resource.id === collection.id).links = Array.from({ length: 13 }, (_, index) => ({ label: `链接 ${index + 1}`, url: `https://example.com/link-${index + 1}` }));
   const excessiveLinkSave = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(excessiveLinks) });
   assert.equal(excessiveLinkSave.response.status, 400);
   const publicContent = await request("/api/content");
+  assert.ok(publicContent.body.achievements.length >= 1);
   const publicCollection = publicContent.body.resources.find((resource) => resource.id === collection.id);
   assert.equal(publicCollection.protected, true);
   assert.equal(publicCollection.url, "");

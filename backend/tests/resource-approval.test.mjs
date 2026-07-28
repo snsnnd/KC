@@ -9,6 +9,8 @@ const adminPassword = "isolated-admin-password";
 const memberPassword = "isolated-member-password";
 
 await fs.rm(dataDirectory, { recursive: true, force: true });
+await fs.mkdir(dataDirectory, { recursive: true });
+await fs.writeFile(`${dataDirectory}/bug-reports.json`, "  \n");
 const serverPath = fileURLToPath(new URL("../src/server.js", import.meta.url));
 const server = spawn(process.execPath, [serverPath], {
   env: {
@@ -16,7 +18,7 @@ const server = spawn(process.execPath, [serverPath], {
     PORT: "3101",
     DATA_DIR: dataDirectory,
     ADMIN_PASSWORD: adminPassword,
-    SESSION_SECRET: "isolated-resource-approval-test-secret",
+    SESSION_SECRET: "isolated-resource-approval-test-secret-at-least-32",
     COOKIE_SECURE: "false"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -58,12 +60,57 @@ try {
     "x-csrf-token": adminLogin.body.csrf
   };
 
+  const imageForm = new FormData();
+  imageForm.append("file", new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")], { type: "image/png" }), "component.png");
+  const imageUpload = await jsonRequest("/api/admin/inventory-image", { method: "POST", headers: { cookie: adminCookie, "x-csrf-token": adminLogin.body.csrf }, body: imageForm });
+  assert.equal(imageUpload.response.status, 201);
+  assert.match(imageUpload.body.url, /^\/uploads\/inventory-\d+-[a-f0-9]{16}\.png$/);
+  assert.equal(imageUpload.body.file.originalName, "component.png");
+  const uploadedFiles = await jsonRequest("/api/admin/uploads", { headers: { cookie: adminCookie } });
+  assert.equal(uploadedFiles.response.status, 200);
+  assert.equal(uploadedFiles.body[0].url, imageUpload.body.url);
+  assert.equal(uploadedFiles.body[0].mime, "image/png");
+  assert.ok(uploadedFiles.body[0].size > 0);
+  const invalidImageItem = await jsonRequest("/api/admin/inventory", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "非法图片材料", unit: "件", quantity: 1, componentImage: "https://example.com/component.png" }) });
+  assert.equal(invalidImageItem.response.status, 400);
+  const missingImageItem = await jsonRequest("/api/admin/inventory", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "不存在图片材料", unit: "件", quantity: 1, componentImage: "/uploads/inventory-1000000000000-0000000000000000.png" }) });
+  assert.equal(missingImageItem.response.status, 400);
+
   const material = await jsonRequest("/api/admin/inventory", {
     method: "POST",
     headers: adminHeaders,
-    body: JSON.stringify({ name: "隔离测试材料", unit: "件", quantity: 10 })
+    body: JSON.stringify({ name: "隔离测试材料", sku: "SENSOR-001", category: "传感器", unit: "件", quantity: 10, locationContainer: "收纳盒", locationLabel: "传感器", locationRow: "1", locationColumn: "1", componentImage: imageUpload.body.url, locationImage: imageUpload.body.url })
   });
   assert.equal(material.response.status, 201);
+  assert.equal(material.body.item.location, "收纳盒的传感器（1，1）");
+  const partialLocationUpdate = await jsonRequest(`/api/admin/inventory/${material.body.item.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ locationContainer: "收纳盒" }) });
+  assert.equal(partialLocationUpdate.response.status, 200);
+  assert.equal(partialLocationUpdate.body.item.location, "收纳盒的传感器（1，1）");
+
+  const importCsv = "材料名称,SKU,分类,单位,初始数量,单位成本,存放位置,备注\n核心板,BOARD-IMPORT-001,控制器,块,6,88,收纳盒的核心板（2，A）,CSV导入验证\n";
+  const inventoryImport = (commit) => {
+    const form = new FormData();
+    form.append("file", new Blob([importCsv], { type: "text/csv" }), "inventory.csv");
+    return jsonRequest(`/api/admin/inventory/import?commit=${commit}`, { method: "POST", headers: { cookie: adminCookie, "x-csrf-token": adminLogin.body.csrf }, body: form });
+  };
+  const importPreview = await inventoryImport(false);
+  assert.equal(importPreview.response.status, 200);
+  assert.equal(importPreview.body.ok, true);
+  assert.equal(importPreview.body.rows[0].location, "收纳盒的核心板（2，A）");
+  let inventoryAfterPreview = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
+  assert.equal(inventoryAfterPreview.body.items.some((item) => item.sku === "BOARD-IMPORT-001"), false, "preview must not write inventory");
+  const importCommit = await inventoryImport(true);
+  assert.equal(importCommit.response.status, 201);
+  assert.equal(importCommit.body.count, 1);
+  inventoryAfterPreview = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
+  assert.equal(inventoryAfterPreview.body.items.find((item) => item.sku === "BOARD-IMPORT-001").quantity, 6);
+  assert.ok(inventoryAfterPreview.body.ledger.some((entry) => entry.itemId === importCommit.body.items[0].id && entry.reason === "表格导入初始库存"));
+  const duplicateImport = await inventoryImport(true);
+  assert.equal(duplicateImport.response.status, 400);
+  const malformedForm = new FormData();
+  malformedForm.append("file", new Blob(["材料名称,单位,备注\n测试件,个,\"未闭合\n"], { type: "text/csv" }), "malformed.csv");
+  const malformedImport = await jsonRequest("/api/admin/inventory/import?commit=false", { method: "POST", headers: { cookie: adminCookie, "x-csrf-token": adminLogin.body.csrf }, body: malformedForm });
+  assert.equal(malformedImport.response.status, 400);
 
   const fund = await jsonRequest("/api/admin/funds", {
     method: "POST",
@@ -123,6 +170,7 @@ try {
     body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity: 3, purpose: "隔离环境审批验证" })
   });
   assert.equal(materialRequest.response.status, 201);
+  assert.equal(Object.hasOwn(materialRequest.body.request, "locationImage"), false);
 
   const fundRequest = await jsonRequest("/api/member/usage-requests", {
     method: "POST",
@@ -135,6 +183,11 @@ try {
   let funds = await jsonRequest("/api/admin/funds", { headers: { cookie: adminCookie } });
   assert.equal(inventory.body.items.find((item) => item.id === material.body.item.id).quantity, 10, "pending material request changed inventory");
   assert.equal(funds.body.accounts.find((account) => account.id === fund.body.account.id).balance, 1000, "pending fund request changed balance");
+  const memberMaterialsBeforeApproval = await jsonRequest("/api/member/resource-management", { headers: { cookie: memberCookie } });
+  const visibleMaterial = memberMaterialsBeforeApproval.body.inventory.find((item) => item.id === material.body.item.id);
+  assert.equal(visibleMaterial.componentImage, imageUpload.body.url);
+  assert.equal(Object.hasOwn(visibleMaterial, "location"), false);
+  assert.equal(Object.hasOwn(visibleMaterial, "locationImage"), false);
 
   const approveMaterial = () => jsonRequest(`/api/admin/usage-requests/${materialRequest.body.request.id}`, {
     method: "PATCH",
@@ -143,6 +196,10 @@ try {
   });
   const concurrentApprovals = await Promise.all([approveMaterial(), approveMaterial()]);
   assert.deepEqual(concurrentApprovals.map(({ response }) => response.status).sort(), [200, 409]);
+  const approvedMaterial = concurrentApprovals.find(({ response }) => response.status === 200).body.request;
+  assert.equal(approvedMaterial.pickupInstruction, "请去收纳盒的传感器（1，1）获取。");
+  assert.equal(approvedMaterial.componentImage, imageUpload.body.url);
+  assert.equal(approvedMaterial.locationImage, imageUpload.body.url);
 
   const approveFund = await jsonRequest(`/api/admin/usage-requests/${fundRequest.body.request.id}`, {
     method: "PATCH",
@@ -157,6 +214,11 @@ try {
   assert.equal(funds.body.accounts.find((account) => account.id === fund.body.account.id).balance, 800);
   assert.equal(inventory.body.ledger.filter((entry) => entry.requestId === materialRequest.body.request.id).length, 1);
   assert.equal(funds.body.ledger.filter((entry) => entry.requestId === fundRequest.body.request.id).length, 1);
+  const memberRequestsAfterApproval = await jsonRequest("/api/member/resource-management", { headers: { cookie: memberCookie } });
+  const approvedMemberRequest = memberRequestsAfterApproval.body.requests.find((request) => request.id === materialRequest.body.request.id);
+  assert.equal(approvedMemberRequest.pickupInstruction, "请去收纳盒的传感器（1，1）获取。");
+  assert.equal(approvedMemberRequest.componentImage, imageUpload.body.url);
+  assert.equal(approvedMemberRequest.locationImage, imageUpload.body.url);
 
   const archivedFund = await jsonRequest(`/api/admin/funds/${fund.body.account.id}`, { method: "PATCH", headers: adminHeaders, body: JSON.stringify({ status: "archived" }) });
   assert.equal(archivedFund.response.status, 200);
@@ -173,17 +235,12 @@ try {
     headers: memberHeaders,
     body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity: 20, purpose: "验证库存不足时拒绝审批" })
   });
-  assert.equal(excessiveRequest.response.status, 201);
-  const excessiveApproval = await jsonRequest(`/api/admin/usage-requests/${excessiveRequest.body.request.id}`, {
-    method: "PATCH",
-    headers: adminHeaders,
-    body: JSON.stringify({ decision: "approved", reviewNote: "应因库存不足失败" })
-  });
-  assert.equal(excessiveApproval.response.status, 409);
-  assert.equal(excessiveApproval.body.error, "当前库存不足，无法批准");
+  assert.equal(excessiveRequest.response.status, 409);
   inventory = await jsonRequest("/api/admin/inventory", { headers: { cookie: adminCookie } });
   assert.equal(inventory.body.items.find((item) => item.id === material.body.item.id).quantity, 7);
 
+  const blockingRequest = await jsonRequest("/api/member/usage-requests", { method: "POST", headers: memberHeaders, body: JSON.stringify({ type: "material", targetId: material.body.item.id, quantity: 7, purpose: "验证待审批材料阻止删除" }) });
+  assert.equal(blockingRequest.response.status, 201);
   const blockedDelete = await jsonRequest(`/api/admin/inventory/${material.body.item.id}`, { method: "DELETE", headers: adminHeaders });
   assert.equal(blockedDelete.response.status, 409);
   const disposable = await jsonRequest("/api/admin/inventory", { method: "POST", headers: adminHeaders, body: JSON.stringify({ name: "待删除测试材料", unit: "件", quantity: 2 }) });
@@ -254,7 +311,7 @@ try {
     materialQuantity: 7,
     fundBalance: 800,
     concurrentApprovalStatuses: concurrentApprovals.map(({ response }) => response.status).sort(),
-    insufficientInventoryStatus: excessiveApproval.response.status,
+    insufficientInventoryStatus: excessiveRequest.response.status,
     pendingDeleteBlocked: true,
     inventoryDeletePreservedLedger: true,
     fundArchiveLifecycle: true,
@@ -263,6 +320,10 @@ try {
     memberMessageReplyLifecycle: true,
     fundArchiveMemberVisibility: true,
     activationReissueBlocksActivated: true,
+    emptyBugReportFileRecovered: true,
+    inventorySpreadsheetImport: true,
+    materialPickupInstruction: approvedMaterial.pickupInstruction,
+    inventoryImagesApprovalGated: true,
     bugReportCrud: true,
     inventoryRestock: true,
     fundTopup: true,

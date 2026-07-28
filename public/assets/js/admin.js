@@ -3,19 +3,29 @@
 
   const initialUrl = new URL(window.location.href);
   const requestedApplicantId = initialUrl.searchParams.get("notifyApplicant") || "";
+  const usesLegacyNotificationUrl = initialUrl.searchParams.get("workspace") === "operations" && initialUrl.hash === "#notifications";
+  if (usesLegacyNotificationUrl) initialUrl.searchParams.set("workspace", "notifications");
   if (requestedApplicantId) {
     initialUrl.searchParams.delete("notifyApplicant");
+  }
+  if (requestedApplicantId || usesLegacyNotificationUrl) {
     window.history.replaceState(null, "", `${initialUrl.pathname}${initialUrl.search}${initialUrl.hash}`);
   }
-  const state = { csrf: "", user: null, workspace: "home", content: null, applications: [], mail: null, managers: [], members: [], notificationAudience: { members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }, requestedApplicantId, resourceSecrets: {}, notifications: [], memberMessages: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], audit: [], syncTimer: 0 };
+  const state = { csrf: "", user: null, workspace: "home", content: null, contentResourceDraftDirty: false, applications: [], mail: null, managers: [], members: [], workspaceMemberOptions: [], notificationAudience: { members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }, requestedApplicantId, resourceSecrets: {}, notifications: [], memberMessages: [], uploads: [], inventory: { items: [], ledger: [] }, funds: { accounts: [], ledger: [] }, usageRequests: [], projectWorkspaces: [], projectWorkspacesError: "", projectWorkspaceFormDirty: false, workspaceAllocationOptions: { inventory: [], funds: [] }, bugReports: [], loadErrors: {}, audit: [], syncTimer: 0 };
+  let inventoryImportReady = false;
+  let inventoryImportGeneration = 0;
+  let projectWorkspaceLoadGeneration = 0;
+  const inventoryImageOperations = new Map();
   const workspaces = {
-    operations: { name: "运营宣发", code: "OPERATIONS", panels: ["settings", "projects", "mail", "notifications", "uploads"] },
+    operations: { name: "运营宣发", code: "OPERATIONS", panels: ["settings", "projects", "project-workspaces", "mail", "uploads"] },
     people: { name: "人员管理", code: "PEOPLE", panels: ["departments", "applications", "members", "managers", "audit"] },
-    assets: { name: "资源与资金", code: "ASSETS", panels: ["resources", "inventory", "funds", "usage"] }
+    assets: { name: "资源与资金", code: "ASSETS", panels: ["resources", "inventory", "funds", "usage"] },
+    notifications: { name: "通知中心", code: "NOTIFICATIONS", panels: ["notifications"] }
   };
   const assignablePanels = {
     settings: "基础信息",
     projects: "项目内容",
+    "project-workspaces": "项目协作",
     departments: "招新部门",
     resources: "资源链接",
     applications: "申请审核",
@@ -33,6 +43,81 @@
 
   function canAccessPanel(panel, user = state.user) {
     return user?.role === "owner" || (user?.panelPermissions || []).includes(panel);
+  }
+
+  function safeUrl(value) {
+    const url = String(value || "").trim();
+    if (url.startsWith("/uploads/")) return url;
+    try {
+      const parsed = new URL(url);
+      return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function formatDate(value, fallback = "未设置", dateOnly = false) {
+    if (!value) return fallback;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return fallback;
+    return dateOnly ? date.toLocaleDateString("zh-CN") : date.toLocaleString("zh-CN");
+  }
+
+  function leadNotificationStatus(notification, isUpdate) {
+    const assigneeCount = Number(notification?.assigneeCount) || 0;
+    const recipientCount = Number(notification?.recipientCount) || 0;
+    if (!assigneeCount) return { text: "", warning: false };
+    if (!recipientCount) return { text: ` / ${isUpdate ? "新增" : "项目"}负责人未配置邮箱，未发送邮件`, warning: true };
+    if (notification.sent) return { text: ` / 已邮件通知 ${recipientCount} 名${isUpdate ? "新增" : ""}负责人`, warning: false };
+    if (notification.rateLimited) return { text: " / 负责人通知邮件频率受限", warning: true };
+    return { text: " / 负责人通知邮件发送失败", warning: true };
+  }
+
+  function openImageViewer(value, title) {
+    const url = safeUrl(value);
+    if (!url) return;
+    const previousFocus = document.activeElement;
+    const viewer = document.createElement("div");
+    viewer.className = "image-viewer";
+    viewer.setAttribute("role", "dialog");
+    viewer.setAttribute("aria-modal", "true");
+    viewer.setAttribute("aria-labelledby", "inventoryImageViewerTitle");
+    const panel = document.createElement("div");
+    panel.className = "image-viewer__panel";
+    const heading = document.createElement("div");
+    const label = document.createElement("b");
+    label.id = "inventoryImageViewerTitle";
+    label.textContent = title;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "关闭 ×";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = title;
+    const dismiss = () => { viewer.remove(); previousFocus?.focus?.(); };
+    close.addEventListener("click", dismiss);
+    viewer.addEventListener("click", (event) => { if (event.target === viewer) dismiss(); });
+    viewer.addEventListener("keydown", (event) => { if (event.key === "Escape") dismiss(); if (event.key === "Tab") { event.preventDefault(); close.focus(); } });
+    heading.append(label, close);
+    panel.append(heading, image);
+    viewer.appendChild(panel);
+    document.body.appendChild(viewer);
+    close.focus();
+  }
+
+  async function uploadInventoryImage(file) {
+    const body = new FormData();
+    body.append("file", file);
+    return api("/api/admin/inventory-image", { method: "POST", body });
+  }
+
+  function queueInventoryImageMutation(itemId, field, operation) {
+    const key = `${itemId}:${field}`;
+    const previous = inventoryImageOperations.get(key) || Promise.resolve();
+    const next = previous.catch(() => {}).then(operation);
+    inventoryImageOperations.set(key, next);
+    next.then(() => { if (inventoryImageOperations.get(key) === next) inventoryImageOperations.delete(key); }, () => { if (inventoryImageOperations.get(key) === next) inventoryImageOperations.delete(key); });
+    return next;
   }
 
   async function api(url, options = {}) {
@@ -53,6 +138,41 @@
   function setStatus(message, isError = false) {
     saveStatus.textContent = message;
     saveStatus.style.color = isError ? "var(--orange)" : "var(--accent)";
+  }
+
+  async function optionalLoad(key, enabled, loader, fallback) {
+    delete state.loadErrors[key];
+    if (!enabled) return fallback;
+    try {
+      return await loader();
+    } catch (error) {
+      state.loadErrors[key] = error.message;
+      return fallback;
+    }
+  }
+
+  function showDashboardLoadErrors() {
+    const labels = { applications: "申请审核", mail: "邮件设置", audit: "操作日志", managers: "管理员", members: "成员", notificationAudience: "通知对象", notifications: "通知记录", memberMessages: "成员问询", inventory: "物资库存", funds: "资金账户", usageRequests: "使用审批", bugReports: "Bug 反馈", projectWorkspaces: "项目协作" };
+    const targets = {
+      applications: "#applicationList",
+      mail: "#mailMessage",
+      audit: "#auditList",
+      managers: "#managerList",
+      members: "#memberList",
+      notificationAudience: "#notificationSummary",
+      notifications: "#notificationHistory",
+      memberMessages: "#memberMessageAdminList",
+      inventory: "#inventoryList",
+      funds: "#fundList",
+      usageRequests: "#usageRequestList",
+      bugReports: "#bugReportList"
+    };
+    Object.entries(state.loadErrors).forEach(([key, error]) => {
+      const target = targets[key] ? document.querySelector(targets[key]) : null;
+      if (target) target.textContent = `${labels[key] || key}加载失败：${error}`;
+    });
+    const failed = Object.keys(state.loadErrors).map((key) => labels[key] || key);
+    if (failed.length) setStatus(`部分数据加载失败：${failed.join(" / ")}`, true);
   }
 
   async function refreshPanel(button, load, render, successMessage) {
@@ -150,6 +270,31 @@
       editor.appendChild(article);
     });
     updateProjectFilters();
+  }
+
+  function renderAchievements() {
+    const editor = document.querySelector("#achievementEditor");
+    editor.replaceChildren();
+    (state.content.achievements || []).forEach((achievement, index) => {
+      const article = card(`${String(index + 1).padStart(2, "0")} / ${achievement.title || "未命名成果"}`, index, () => {
+        state.content = collectContent();
+        state.content.achievements.splice(index, 1);
+        renderAchievements();
+      });
+      const grid = document.createElement("div");
+      grid.className = "editor-grid";
+      grid.append(
+        field("成果编号", achievement.id, "id"), field("成果名称", achievement.title, "title"),
+        field("成果类型", achievement.type || "项目成果", "type"), field("日期 / 年份", achievement.date || "", "date"),
+        field("关联项目编号", achievement.projectId || "", "projectId", { placeholder: "SYS_001" }),
+        field("展示图片", achievement.image || "", "image", { placeholder: "/uploads/achievement.webp" }),
+        field("详情链接", achievement.url || "", "url", { placeholder: "https://..." }),
+        field("成果说明", achievement.description || "", "description", { wide: true, multiline: true })
+      );
+      article.appendChild(grid);
+      editor.appendChild(article);
+    });
+    if (!(state.content.achievements || []).length) editor.textContent = "NO ACHIEVEMENTS / 暂无独立成果，官网将使用项目生成默认展示";
   }
 
   function updateProjectFilters() {
@@ -283,22 +428,27 @@
       const values = collectFields(article);
       const links = [...article.querySelectorAll(".link-row")].map((row) => ({
         label: row.querySelector('[data-link-field="label"]').value,
-        url: row.querySelector('[data-link-field="url"]').value
+        url: safeUrl(row.querySelector('[data-link-field="url"]').value)
       }));
-      return { ...values, tags: values.tags.split(",").map((tag) => tag.trim()).filter(Boolean), links };
+      return { ...values, video: safeUrl(values.video), poster: safeUrl(values.poster), tags: values.tags.split(",").map((tag) => tag.trim()).filter(Boolean), links };
+    });
+    const achievements = [...document.querySelectorAll("#achievementEditor .editor-card")].map((article) => {
+      const values = collectFields(article);
+      return { ...values, image: safeUrl(values.image), url: safeUrl(values.url) };
     });
     const departments = [...document.querySelectorAll("#departmentEditor .editor-card")].map(collectFields);
     const collectResourceNode = (article) => {
       const resource = collectFields(article.querySelector(":scope > .editor-grid"));
+      resource.url = safeUrl(resource.url);
       const linkEditor = article.querySelector(":scope > .editor-grid > [data-resource-links]");
-      resource.links = [...linkEditor.querySelectorAll(":scope > .link-row")].map((row) => ({ label: row.querySelector('[data-link-field="label"]').value, url: row.querySelector('[data-link-field="url"]').value }));
+      resource.links = [...linkEditor.querySelectorAll(":scope > .link-row")].map((row) => ({ label: row.querySelector('[data-link-field="label"]').value, url: safeUrl(row.querySelector('[data-link-field="url"]').value) }));
       const children = article.querySelector(":scope > [data-resource-children]");
       resource.children = children ? [...children.children].filter((child) => child.matches("[data-resource-node]")).map(collectResourceNode) : [];
       if (!resource.accessSecret && state.resourceSecrets[resource.id]) resource.clearSecret = true;
       return resource;
     };
     const resources = [...document.querySelectorAll("#resourceEditor > [data-resource-node]")].map(collectResourceNode);
-    return { settings, projects, departments, resources, _meta: state.content._meta || { revision: 0 } };
+    return { settings, projects, achievements, departments, resources, _meta: state.content._meta || { revision: 0 } };
   }
 
   async function saveContent() {
@@ -306,6 +456,7 @@
       setStatus("SAVING...");
       const payload = await api("/api/admin/content", { method: "PUT", body: JSON.stringify(collectContent()) });
       state.content = payload.content;
+      state.contentResourceDraftDirty = false;
       state.resourceSecrets = canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? await api("/api/admin/resource-secrets", { method: "POST", body: "{}" }) : {};
       renderAllEditors();
       setStatus("SAVED / SYNCED");
@@ -354,6 +505,7 @@
         status.appendChild(option);
       });
       status.addEventListener("change", async () => {
+        status.disabled = true;
         try {
           const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "PATCH", body: JSON.stringify({ status: status.value }) });
           Object.assign(application, payload.application);
@@ -362,6 +514,8 @@
         } catch (error) {
           setStatus(error.message, true);
           status.value = application.status;
+        } finally {
+          status.disabled = ["accepted", "rejected"].includes(application.status);
         }
       });
       const remove = document.createElement("button");
@@ -370,12 +524,15 @@
       remove.textContent = "删除申请";
       remove.addEventListener("click", async () => {
         if (!window.confirm(`确认删除 ${application.name} 的申请？`)) return;
+        remove.disabled = true;
         try {
           await api(`/api/admin/applications/${encodeURIComponent(application.id)}`, { method: "DELETE" });
           state.applications = state.applications.filter((item) => item.id !== application.id);
           renderApplications();
         } catch (error) {
           setStatus(error.message, true);
+        } finally {
+          remove.disabled = false;
         }
       });
       controls.appendChild(status);
@@ -401,6 +558,7 @@
             setStatus(payload.notified ? "APPLICATION DECIDED / RESULT EMAIL SENT" : "APPLICATION DECIDED / RESULT EMAIL NOT SENT", !payload.notified);
           } catch (error) {
             setStatus(error.message, true);
+          } finally {
             approve.disabled = false;
             reject.disabled = false;
           }
@@ -429,7 +587,7 @@
           notify.type = "button";
           notify.className = "small-button";
           notify.textContent = "通知此申请人";
-          notify.addEventListener("click", () => window.location.assign(`/admin.html?workspace=operations&notifyApplicant=${encodeURIComponent(application.id)}#notifications`));
+          notify.addEventListener("click", () => window.location.assign(`/admin.html?workspace=notifications&notifyApplicant=${encodeURIComponent(application.id)}#notifications`));
           controls.appendChild(notify);
         }
       } else {
@@ -443,6 +601,7 @@
           promote.textContent = "转为成员";
           promote.addEventListener("click", async () => {
             const permissionText = window.prompt("初始资源权限（逗号分隔，可留空）", "resource.basic") || "";
+            promote.disabled = true;
             try {
               const payload = await api(`/api/admin/applications/${encodeURIComponent(application.id)}/promote`, { method: "POST", body: JSON.stringify({ permissions: permissionText.split(",").map((item) => item.trim()).filter(Boolean) }) });
               Object.assign(application, payload.application);
@@ -452,6 +611,7 @@
               if (state.user.role === "owner") renderManagerFormAccess();
               setStatus(`MEMBER CREATED / ${payload.member.username} / 激活码 ${payload.activationCode}${payload.activationNotified ? " / 已发送邮箱" : " / 请转交成员"}`);
             } catch (error) { setStatus(error.message, true); }
+            finally { promote.disabled = false; }
           });
           controls.appendChild(promote);
         }
@@ -464,9 +624,365 @@
 
   function renderAllEditors() {
     if (canAccessPanel("settings")) renderSettings();
-    if (canAccessPanel("projects")) renderProjects();
+    if (canAccessPanel("projects")) { renderProjects(); renderAchievements(); }
     if (canAccessPanel("departments")) renderDepartments();
     if (canAccessPanel("resources")) renderResources();
+  }
+
+  function recordId(value) {
+    return typeof value === "string" ? value : value?.id || value?.memberId || "";
+  }
+
+  function workspaceIds(workspace, kind) {
+    const candidates = kind === "leaders"
+      ? [workspace.managerIds, workspace.leaderIds, workspace.leaders, workspace.leaderMembers, workspace.owners]
+      : [workspace.memberIds, workspace.members, workspace.memberDetails];
+    return (candidates.find(Array.isArray) || []).map(recordId).filter(Boolean);
+  }
+
+  function projectWorkspaceList(payload) {
+    if (Array.isArray(payload)) return payload;
+    for (const key of ["projectWorkspaces", "workspaces", "items"]) if (Array.isArray(payload?.[key])) return payload[key];
+    return [];
+  }
+
+  function applyProjectWorkspacePayload(payload) {
+    state.projectWorkspaces = projectWorkspaceList(payload);
+    if (Array.isArray(payload?.members)) state.workspaceMemberOptions = payload.members.map((member) => ({ ...member, status: member.status || "active" }));
+    if (state.workspaceMemberOptions.length && !state.members.length) state.members = [...state.workspaceMemberOptions];
+    if (!state.members.length) {
+      const members = new Map();
+      state.projectWorkspaces.flatMap((workspace) => workspace.members || []).forEach((member) => members.set(member.id, { ...member, status: member.status || "active" }));
+      state.members = [...members.values()];
+    }
+    const inventoryOptions = Array.isArray(payload?.inventory?.items) ? payload.inventory.items : Array.isArray(payload?.inventory) ? payload.inventory : [];
+    const fundOptions = Array.isArray(payload?.funds?.accounts) ? payload.funds.accounts : Array.isArray(payload?.funds) ? payload.funds : [];
+    state.workspaceAllocationOptions = {
+      inventory: inventoryOptions.filter((item) => !item.status || item.status === "active"),
+      funds: fundOptions.filter((account) => !account.status || account.status === "active")
+    };
+  }
+
+  function syncWorkspaceMemberOption(member) {
+    if (!member?.id) return;
+    const index = state.workspaceMemberOptions.findIndex((item) => item.id === member.id);
+    if (member.status === "active") {
+      if (index >= 0) state.workspaceMemberOptions[index] = { ...state.workspaceMemberOptions[index], ...member };
+      else state.workspaceMemberOptions.push({ ...member });
+    } else if (index >= 0) {
+      state.workspaceMemberOptions.splice(index, 1);
+    }
+  }
+
+  async function loadProjectWorkspaces() {
+    const generation = ++projectWorkspaceLoadGeneration;
+    let payload;
+    try {
+      payload = await api("/api/admin/project-workspaces?options=1");
+    } catch (error) {
+      if (generation !== projectWorkspaceLoadGeneration) return false;
+      throw error;
+    }
+    if (generation !== projectWorkspaceLoadGeneration) return false;
+    applyProjectWorkspacePayload(payload);
+    state.projectWorkspacesError = "";
+    delete state.loadErrors.projectWorkspaces;
+    return true;
+  }
+
+  function projectAllocationTargets(type) {
+    return type === "material" ? state.workspaceAllocationOptions.inventory : state.workspaceAllocationOptions.funds;
+  }
+
+  function fillAllocationTarget(select, type, selectedId, fallbackName = "") {
+    select.replaceChildren();
+    const targets = projectAllocationTargets(type);
+    targets.forEach((target) => select.appendChild(new Option(`${target.name} / ${type === "material" ? target.unit : target.currency}`, target.id)));
+    if (selectedId && !targets.some((target) => target.id === selectedId)) select.appendChild(new Option(`${fallbackName || selectedId} / 当前列表不可用`, selectedId));
+    select.value = selectedId || select.options[0]?.value || "";
+  }
+
+  function addProjectAllocationRow(allocation = {}) {
+    const container = document.querySelector("#projectAllocationRows");
+    const row = document.createElement("div");
+    row.className = "project-allocation-row";
+    row.dataset.allocationId = allocation.id || "";
+    const type = document.createElement("select");
+    type.dataset.allocationField = "type";
+    type.setAttribute("aria-label", "配额类型");
+    type.appendChild(new Option("材料", "material"));
+    if (state.user.role === "owner" || allocation.type === "fund") type.appendChild(new Option("资金", "fund"));
+    type.value = allocation.type === "fund" ? "fund" : "material";
+    const lockedFund = state.user.role !== "owner" && type.value === "fund";
+    const target = document.createElement("select");
+    target.dataset.allocationField = "targetId";
+    target.setAttribute("aria-label", "配额目标");
+    fillAllocationTarget(target, type.value, allocation.targetId || allocation.target?.id || "", allocation.targetName || allocation.name || allocation.target?.name || "");
+    type.addEventListener("change", () => fillAllocationTarget(target, type.value, ""));
+    const allocated = document.createElement("input");
+    allocated.dataset.allocationField = "allocated";
+    allocated.type = "number";
+    allocated.min = "0.01";
+    allocated.step = "0.01";
+    allocated.required = true;
+    allocated.value = allocation.allocated ?? 0;
+    allocated.placeholder = "分配额度";
+    const note = document.createElement("input");
+    note.dataset.allocationField = "note";
+    note.maxLength = 500;
+    note.value = allocation.note || "";
+    note.placeholder = "配额备注";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger-button";
+    remove.textContent = "移除";
+    remove.addEventListener("click", () => {
+      row.remove();
+      state.projectWorkspaceFormDirty = true;
+    });
+    if (lockedFund) {
+      row.classList.add("is-readonly");
+      type.disabled = true;
+      target.disabled = true;
+      allocated.disabled = true;
+      note.disabled = true;
+      remove.disabled = true;
+      remove.textContent = "资金配额只读";
+    }
+    row.append(type, target, allocated, note, remove);
+    container.appendChild(row);
+  }
+
+  function syncProjectLeaderChoices() {
+    const memberSelect = document.querySelector("#projectWorkspaceMembers");
+    const leaderSelect = document.querySelector("#projectWorkspaceLeaders");
+    const selectedMembers = new Set([...memberSelect.selectedOptions].map((option) => option.value));
+    [...leaderSelect.options].forEach((option) => {
+      option.disabled = !selectedMembers.has(option.value);
+      if (option.disabled) option.selected = false;
+    });
+  }
+
+  function populateProjectWorkspaceForm(workspace = null) {
+    const form = document.querySelector("#projectWorkspaceForm");
+    const projectSelect = document.querySelector("#projectWorkspaceProject");
+    const memberSelect = document.querySelector("#projectWorkspaceMembers");
+    const leaderSelect = document.querySelector("#projectWorkspaceLeaders");
+    const projectId = workspace?.projectId || workspace?.project?.id || "";
+    projectSelect.replaceChildren(new Option("不关联公开项目", ""));
+    (state.content?.projects || []).forEach((project) => projectSelect.appendChild(new Option(`${project.id} / ${project.title}`, project.id)));
+    if (projectId && !(state.content?.projects || []).some((project) => project.id === projectId)) projectSelect.appendChild(new Option(projectId, projectId));
+    projectSelect.value = projectId;
+    memberSelect.replaceChildren();
+    leaderSelect.replaceChildren();
+    const memberOptions = state.workspaceMemberOptions.length ? state.workspaceMemberOptions : state.members;
+    memberOptions.filter((item) => item.status === "active").forEach((item) => {
+      const label = `${item.name} / @${item.username || item.studentId || item.id}`;
+      memberSelect.appendChild(new Option(label, item.id));
+      leaderSelect.appendChild(new Option(label, item.id));
+    });
+    const memberIds = new Set(workspace ? workspaceIds(workspace, "members") : []);
+    const leaderIds = new Set(workspace ? workspaceIds(workspace, "leaders") : []);
+    [...memberSelect.options].forEach((option) => { option.selected = memberIds.has(option.value); });
+    [...leaderSelect.options].forEach((option) => { option.selected = leaderIds.has(option.value); });
+    syncProjectLeaderChoices();
+    form.elements.id.value = workspace?.id || "";
+    form.elements.revision.value = String(Number(workspace?.revision) || 0);
+    form.elements.name.value = workspace?.name || "";
+    form.elements.description.value = workspace?.description || "";
+    const status = workspace?.status || "planning";
+    if (![...form.elements.status.options].some((option) => option.value === status)) form.elements.status.appendChild(new Option(status, status));
+    form.elements.status.value = status;
+    document.querySelector("#projectWorkspaceAutoProgress").textContent = `${Math.max(0, Math.min(100, Number(workspace?.progress) || 0))}%（按已完成任务计算）`;
+    document.querySelector("#projectAllocationRows").replaceChildren();
+    (workspace?.allocations || []).forEach(addProjectAllocationRow);
+    const submit = form.querySelector('button[type="submit"]');
+    submit.textContent = workspace ? "SAVE WORKSPACE" : "CREATE WORKSPACE";
+    document.querySelector("#cancelProjectWorkspaceEdit").hidden = !workspace;
+    document.querySelector("#projectWorkspaceMessage").textContent = workspace ? `EDITING REVISION ${Number(workspace.revision) || 0}` : "";
+    state.projectWorkspaceFormDirty = false;
+  }
+
+  function resetProjectWorkspaceForm() {
+    const form = document.querySelector("#projectWorkspaceForm");
+    form.reset();
+    populateProjectWorkspaceForm();
+    state.projectWorkspaceFormDirty = false;
+    document.querySelector("#projectWorkspaceMessage").textContent = "";
+  }
+
+  function memberNameById(id) {
+    const member = [...state.workspaceMemberOptions, ...state.members].find((item) => item.id === id);
+    return member?.name || member?.username || id;
+  }
+
+  function renderProjectWorkspaces() {
+    const list = document.querySelector("#projectWorkspaceList");
+    const message = document.querySelector("#projectWorkspaceMessage");
+    list.replaceChildren();
+    if (state.projectWorkspacesError) {
+      message.textContent = `项目工作区加载失败：${state.projectWorkspacesError}`;
+      list.textContent = message.textContent;
+      return;
+    }
+    state.projectWorkspaces.forEach((workspace) => {
+      const article = document.createElement("article");
+      article.className = "project-workspace-admin-card";
+      const head = document.createElement("header");
+      const identity = document.createElement("div");
+      const code = document.createElement("span");
+      code.textContent = `[ ${String(workspace.status || "unknown").toUpperCase()} / ${workspace.projectId || workspace.project?.id || "NO PUBLIC PROJECT"} ]`;
+      const title = document.createElement("h2");
+      title.textContent = workspace.name || "未命名工作区";
+      const description = document.createElement("p");
+      description.textContent = workspace.description || "暂无说明";
+      identity.append(code, title, description);
+      const metrics = document.createElement("div");
+      metrics.className = "project-workspace-metrics";
+      const taskCount = Array.isArray(workspace.tasks) ? workspace.tasks.length : Number(workspace.taskCount) || 0;
+      const updateCount = Array.isArray(workspace.updates) ? workspace.updates.length : Number(workspace.updateCount) || 0;
+      metrics.textContent = `REVISION ${Number(workspace.revision) || 0}\nPROGRESS ${Number(workspace.progress) || 0}%\nTASKS ${taskCount}\nUPDATES ${updateCount}`;
+      head.append(identity, metrics);
+      const people = document.createElement("p");
+      people.className = "project-workspace-people";
+      people.textContent = `负责人：${workspaceIds(workspace, "leaders").map(memberNameById).join(" / ") || "未指定"}\n成员：${workspaceIds(workspace, "members").map(memberNameById).join(" / ") || "未指定"}`;
+      const taskDetails = document.createElement("section");
+      taskDetails.className = "project-workspace-detail-section";
+      const taskHeading = document.createElement("h3");
+      const tasks = Array.isArray(workspace.tasks) ? workspace.tasks : [];
+      const doneTasks = tasks.filter((task) => task.status === "done").length;
+      taskHeading.textContent = `任务明细 / 已完成 ${doneTasks} / ${tasks.length}`;
+      const taskList = document.createElement("div");
+      taskList.className = "project-workspace-task-detail-list";
+      tasks.forEach((task) => {
+        const row = document.createElement("article");
+        const taskTitle = document.createElement("b");
+        taskTitle.textContent = task.title || "未命名任务";
+        const taskDescription = document.createElement("p");
+        taskDescription.textContent = task.description || "暂无任务说明";
+        const taskMeta = document.createElement("span");
+        taskMeta.textContent = `${String(task.status || "todo").toUpperCase()} / 执行人：${(task.assigneeIds || []).map(memberNameById).join(" / ") || "未分配"} / 截止：${formatDate(task.dueDate, "未设置", true)}`;
+        row.append(taskTitle, taskDescription, taskMeta);
+        taskList.appendChild(row);
+      });
+      if (!tasks.length) taskList.textContent = "负责人尚未拆分任务";
+      taskDetails.append(taskHeading, taskList);
+      const updateDetails = document.createElement("section");
+      updateDetails.className = "project-workspace-detail-section";
+      const updateHeading = document.createElement("h3");
+      updateHeading.textContent = "最近完成内容与动态";
+      const updateList = document.createElement("div");
+      updateList.className = "project-workspace-update-detail-list";
+      (workspace.updates || []).slice(0, 12).forEach((update) => {
+        const row = document.createElement("article");
+        const meta = document.createElement("span");
+        meta.textContent = `${update.actor?.name || update.actor?.displayName || update.actor?.username || "成员"} / ${formatDate(update.createdAt, "时间未知")}`;
+        const detail = document.createElement("p");
+        detail.textContent = update.message || "无内容";
+        row.append(meta, detail);
+        updateList.appendChild(row);
+      });
+      if (!(workspace.updates || []).length) updateList.textContent = "暂无项目动态";
+      updateDetails.append(updateHeading, updateList);
+      const deliverableDetails = document.createElement("section");
+      deliverableDetails.className = "project-workspace-detail-section";
+      const deliverableHeading = document.createElement("h3");
+      const deliverables = Array.isArray(workspace.deliverables) ? workspace.deliverables : [];
+      deliverableHeading.textContent = `项目成果 / ${deliverables.length}`;
+      const deliverableList = document.createElement("div");
+      deliverableList.className = "project-workspace-deliverable-list";
+      deliverables.forEach((deliverable) => {
+        const row = document.createElement("article");
+        const link = document.createElement("a");
+        link.href = safeUrl(deliverable.url) || "#";
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = `${deliverable.title} ↗`;
+        const description = document.createElement("p");
+        description.textContent = deliverable.description || "暂无说明";
+        const meta = document.createElement("span");
+        meta.textContent = `${String(deliverable.type || "other").toUpperCase()} / ${deliverable.submittedBy?.name || deliverable.submittedBy?.username || "项目成员"}${deliverable.archivedResourceId ? ` / 已归档：${deliverable.archivedResourceId}` : " / 待归档"}`;
+        row.append(link, description, meta);
+        if (!deliverable.archivedResourceId && ["owner", "editor"].includes(state.user.role) && canAccessPanel("resources")) {
+          const archive = document.createElement("button");
+          archive.type = "button";
+          archive.className = "small-button";
+          archive.textContent = "归档到内部资料";
+          archive.addEventListener("click", async () => {
+            if (state.contentResourceDraftDirty) {
+              setStatus("内部资料存在未保存修改，请先保存后再归档项目成果", true);
+              return;
+            }
+            const defaultPermission = `project.${String(workspace.id).toLowerCase().replace(/[^a-z0-9._-]/g, "-")}`.slice(0, 80);
+            const permissionKey = window.prompt("设置资料权限标识；归档后可在资源编辑器继续整理", defaultPermission);
+            if (permissionKey === null) return;
+            archive.disabled = true;
+            try {
+              const payload = await api(`/api/admin/project-workspaces/${encodeURIComponent(workspace.id)}/deliverables/${encodeURIComponent(deliverable.id)}/archive`, { method: "POST", body: JSON.stringify({ permissionKey }) });
+              Object.assign(workspace, payload.workspace);
+              if (Array.isArray(payload.resources)) state.content.resources = payload.resources;
+              if (payload.contentMeta) state.content._meta = payload.contentMeta;
+              state.contentResourceDraftDirty = false;
+              renderProjectWorkspaces();
+              if (canAccessPanel("resources")) renderResources();
+              setStatus("PROJECT DELIVERABLE ARCHIVED / 已归档到内部资料");
+            } catch (error) { setStatus(error.message, true); }
+            finally { archive.disabled = false; }
+          });
+          row.appendChild(archive);
+        }
+        deliverableList.appendChild(row);
+      });
+      if (!deliverables.length) deliverableList.textContent = "项目组尚未提交资料、网站或仓库链接";
+      deliverableDetails.append(deliverableHeading, deliverableList);
+      const allocations = document.createElement("div");
+      allocations.className = "project-workspace-allocation-summary";
+      (workspace.allocations || []).forEach((allocation) => {
+        const row = document.createElement("p");
+        const allocated = Number(allocation.allocated) || 0;
+        const used = Number(allocation.used) || 0;
+        const pending = Number(allocation.pending) || 0;
+        const remaining = Number.isFinite(Number(allocation.remaining)) ? Number(allocation.remaining) : Math.max(0, allocated - used - pending);
+        const unit = allocation.unit || allocation.currency || allocation.target?.unit || allocation.target?.currency || "";
+        row.textContent = `${allocation.targetName || allocation.name || allocation.target?.name || allocation.targetId} / ${String(allocation.type || "resource").toUpperCase()} / ALLOCATED ${allocated} / USED ${used} / PENDING ${pending} / REMAINING ${remaining} ${unit}`;
+        allocations.appendChild(row);
+      });
+      if (!allocations.children.length) allocations.textContent = "NO ALLOCATIONS / 暂无配额";
+      const actions = document.createElement("div");
+      actions.className = "project-workspace-card-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "small-button";
+      edit.textContent = "编辑";
+      edit.addEventListener("click", () => {
+        populateProjectWorkspaceForm(workspace);
+        document.querySelector("#projectWorkspaceForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger-button";
+      remove.textContent = "删除";
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`确认删除项目工作区“${workspace.name}”？`)) return;
+        remove.disabled = true;
+        try {
+          await api(`/api/admin/project-workspaces/${encodeURIComponent(workspace.id)}`, { method: "DELETE" });
+          state.projectWorkspaces = state.projectWorkspaces.filter((item) => item.id !== workspace.id);
+          if (document.querySelector("#projectWorkspaceForm").elements.id.value === workspace.id) resetProjectWorkspaceForm();
+          renderProjectWorkspaces();
+          setStatus("PROJECT WORKSPACE DELETED");
+        } catch (error) {
+          setStatus(error.message, true);
+        } finally {
+          remove.disabled = false;
+        }
+      });
+      if (["owner", "editor"].includes(state.user.role)) actions.appendChild(edit);
+      if (state.user.role === "owner") actions.appendChild(remove);
+      article.append(head, people, taskDetails, updateDetails, deliverableDetails, allocations, actions);
+      list.appendChild(article);
+    });
+    if (!state.projectWorkspaces.length) list.textContent = "NO PROJECT WORKSPACES / 暂无项目工作区";
   }
 
   function renderMail() {
@@ -701,6 +1217,7 @@
           try {
             const payload = await api(`/api/admin/members/${encodeURIComponent(member.id)}`, { method: "PATCH", body: JSON.stringify({ status: status.value, permissions: permissions.value.split(",").map((item) => item.trim()).filter(Boolean) }) });
             Object.assign(member, payload.member);
+            syncWorkspaceMemberOption(payload.member);
             setStatus("MEMBER ACCESS UPDATED");
           } catch (error) { setStatus(error.message, true); }
         });
@@ -886,6 +1403,56 @@
     if (!(state.bugReports || []).length) list.textContent = "NO BUG REPORTS / 暂无 Bug 反馈";
   }
 
+  function formatFileSize(bytes) {
+    const size = Number(bytes) || 0;
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function renderUploads() {
+    const library = document.querySelector("#uploadLibrary");
+    library.replaceChildren();
+    state.uploads.forEach((file) => {
+      const card = document.createElement("article");
+      card.className = "upload-card";
+      const preview = document.createElement("div");
+      preview.className = "upload-card__preview";
+      if (file.mime.startsWith("image/")) {
+        const image = document.createElement("img");
+        image.src = file.url;
+        image.alt = file.originalName;
+        image.loading = "lazy";
+        preview.appendChild(image);
+      } else if (file.mime.startsWith("video/")) {
+        const video = document.createElement("video");
+        video.src = file.url;
+        video.controls = true;
+        video.preload = "metadata";
+        preview.appendChild(video);
+      }
+      const title = document.createElement("h3");
+      title.textContent = file.originalName;
+      const meta = document.createElement("p");
+      meta.textContent = `${file.fileName}\n${file.mime} / ${formatFileSize(file.size)}\n${formatDate(file.createdAt)}${file.uploadedBy ? ` / ${file.uploadedBy.displayName || file.uploadedBy.username}` : ""}`;
+      const actions = document.createElement("div");
+      actions.className = "upload-card__actions";
+      const view = document.createElement("a");
+      view.href = file.url;
+      view.target = "_blank";
+      view.rel = "noopener";
+      view.textContent = "查看";
+      const download = document.createElement("a");
+      download.href = file.url;
+      download.download = file.originalName || file.fileName;
+      download.textContent = "下载";
+      actions.append(view, download);
+      card.append(preview, title, meta, actions);
+      library.appendChild(card);
+    });
+    if (!state.uploads.length) library.textContent = "NO UPLOADED FILES / 暂无上传文件";
+  }
+
   function updateNotificationSummary() {
     const form = document.querySelector("#notificationForm");
     const allMembers = form.elements.allMembers.checked;
@@ -898,16 +1465,94 @@
     document.querySelector("#notificationSummary").textContent = `AUDIENCE / ${allMembers ? `ALL MEMBERS ${state.notificationAudience.members.length}` : `MEMBERS ${selectedMembers}`} / ${allApplicants ? `ALL APPLICANTS ${state.notificationAudience.applicants.length}` : `APPLICANTS ${selectedApplicants}`} / DEPARTMENTS ${selectedDepartments} / PERMISSIONS ${permissionKeys} / CUSTOM ${customEmails}${form.elements.includeManagers.checked ? " / MANAGERS" : ""}${form.elements.includeDefaultRecipients.checked ? " / DEFAULT GROUP" : ""}`;
   }
 
+  function renderInventoryImportPreview(payload) {
+    const container = document.querySelector("#inventoryImportPreview");
+    const errorsByRow = new Map((payload.errors || []).map((error) => [error.row, error.messages || []]));
+    container.replaceChildren();
+    (payload.rows || []).slice(0, 100).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = `inventory-import-row${errorsByRow.has(item.row) ? " is-error" : ""}`;
+      const rowNumber = document.createElement("span");
+      rowNumber.textContent = `#${item.row}`;
+      const name = document.createElement("b");
+      name.textContent = `${item.name || "未命名"}${item.sku ? ` / ${item.sku}` : ""}`;
+      const quantity = document.createElement("span");
+      quantity.textContent = `${item.quantity} ${item.unit || "-"}`;
+      const cost = document.createElement("span");
+      cost.textContent = `¥ ${Number(item.unitCost || 0).toFixed(2)}`;
+      const location = document.createElement("span");
+      location.textContent = errorsByRow.has(item.row) ? errorsByRow.get(item.row).join("；") : item.location || "不发送领取位置";
+      row.append(rowNumber, name, quantity, cost, location);
+      container.appendChild(row);
+    });
+    if ((payload.rows || []).length > 100) {
+      const more = document.createElement("p");
+      more.textContent = `仅展示前 100 行，另有 ${payload.rows.length - 100} 行将在确认后导入。`;
+      container.appendChild(more);
+    }
+  }
+
+  async function parseInventoryImport(commit = false) {
+    const fileInput = document.querySelector("#inventoryImportFile");
+    const message = document.querySelector("#inventoryImportMessage");
+    const commitButton = document.querySelector("#commitInventoryImport");
+    const selectedFile = fileInput.files[0];
+    const generation = inventoryImportGeneration;
+    if (!selectedFile) { message.textContent = "请选择表格文件"; return null; }
+    const body = new FormData();
+    body.append("file", selectedFile);
+    message.textContent = commit ? "IMPORTING / 正在写入库存..." : "PARSING / 正在解析并校验...";
+    const payload = await api(`/api/admin/inventory/import?commit=${commit}`, { method: "POST", body });
+    if (!commit) {
+      if (generation !== inventoryImportGeneration || fileInput.files[0] !== selectedFile) return null;
+      renderInventoryImportPreview(payload);
+      inventoryImportReady = payload.ok && payload.count > 0;
+      commitButton.disabled = !inventoryImportReady;
+      message.textContent = payload.errors?.length ? `发现 ${payload.errors.length} 行错误，请修正表格后重新预览` : `解析成功：${payload.count} 行物资可以导入`;
+    }
+    return payload;
+  }
+
   function renderInventory() {
     const list = document.querySelector("#inventoryList");
+    const search = document.querySelector("#inventorySearch");
+    const categorySelect = document.querySelector("#inventoryCategory");
+    const count = document.querySelector("#inventoryCount");
+    const categories = [...new Set(state.inventory.items.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+    const selectedCategory = categorySelect.value;
+    categorySelect.replaceChildren(new Option("全部分类", ""), ...categories.map((category) => new Option(category, category)));
+    categorySelect.value = categories.includes(selectedCategory) ? selectedCategory : "";
+    const query = search.value.trim().toLocaleLowerCase("zh-CN");
+    const filteredItems = state.inventory.items.filter((item) => {
+      if (categorySelect.value && item.category !== categorySelect.value) return false;
+      return !query || [item.name, item.sku, item.category, item.location, item.storageLocation?.label].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(query));
+    });
+    count.textContent = `${filteredItems.length} / ${state.inventory.items.length} ITEMS`;
     list.replaceChildren();
-    state.inventory.items.forEach((item) => {
+    filteredItems.forEach((item) => {
       const article = document.createElement("article");
       article.className = "inventory-card";
       const code = document.createElement("span");
       code.textContent = `[ ${item.sku || item.id} / ${item.category || "UNCATEGORIZED"} ]`;
       const title = document.createElement("h3");
       title.textContent = item.name;
+      const media = document.createElement("div");
+      media.className = "inventory-card__media";
+      [["componentImage", "元器件图片"], ["locationImage", "领取位置图片"]].forEach(([field, labelText]) => {
+        const url = safeUrl(item[field]);
+        if (!url) return;
+        const view = document.createElement("button");
+        view.type = "button";
+        view.title = `查看${labelText}`;
+        const image = document.createElement("img");
+        image.src = url;
+        image.alt = `${item.name} ${labelText}`;
+        const label = document.createElement("span");
+        label.textContent = labelText;
+        view.append(image, label);
+        view.addEventListener("click", () => openImageViewer(url, `${item.name} / ${labelText}`));
+        media.appendChild(view);
+      });
       const meta = document.createElement("p");
       meta.textContent = `${item.location || "未设置位置"}\n单位成本：${Number(item.unitCost || 0).toFixed(2)}`;
       const value = document.createElement("div");
@@ -919,16 +1564,87 @@
       const actions = document.createElement("div");
       actions.className = "inventory-actions";
       if (["owner", "editor"].includes(state.user.role)) {
+        const manageImage = (field, labelText) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "small-button";
+          button.textContent = item[field] ? `替换${labelText}` : `上传${labelText}`;
+          button.addEventListener("click", () => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "image/jpeg,image/png,image/webp,image/avif";
+            input.addEventListener("change", async () => {
+              if (!input.files[0]) return;
+              button.disabled = true;
+              try {
+                const payload = await queueInventoryImageMutation(item.id, field, async () => {
+                  const uploaded = await uploadInventoryImage(input.files[0]);
+                  return api(`/api/admin/inventory/${item.id}`, { method: "PATCH", body: JSON.stringify({ [field]: uploaded.url }) });
+                });
+                Object.assign(item, payload.item);
+                renderInventory();
+                setStatus(`${labelText}已更新`);
+              } catch (error) { setStatus(error.message, true); }
+              finally { button.disabled = false; }
+            }, { once: true });
+            input.click();
+          });
+          actions.appendChild(button);
+          if (item[field]) {
+            const clear = document.createElement("button");
+            clear.type = "button";
+            clear.className = "small-button";
+            clear.textContent = `清除${labelText}`;
+            clear.addEventListener("click", async () => {
+              clear.disabled = true;
+              try {
+                const payload = await queueInventoryImageMutation(item.id, field, () => api(`/api/admin/inventory/${item.id}`, { method: "PATCH", body: JSON.stringify({ [field]: "" }) }));
+                Object.assign(item, payload.item);
+                renderInventory();
+                setStatus(`${labelText}已从当前库存记录清除`);
+              } catch (error) { setStatus(error.message, true); }
+              finally { clear.disabled = false; }
+            });
+            actions.appendChild(clear);
+          }
+        };
+        manageImage("componentImage", "元器件图");
+        manageImage("locationImage", "位置图");
+        const editLocation = document.createElement("button");
+        editLocation.type = "button";
+        editLocation.className = "small-button";
+        editLocation.textContent = "编辑位置";
+        editLocation.addEventListener("click", async () => {
+          const current = item.storageLocation || {};
+          const container = window.prompt("收纳容器（全部留空可清除领取位置）", current.container || "收纳盒");
+          if (container === null) return;
+          const label = window.prompt("位置标签，例如传感器 / 核心板", current.label || "");
+          if (label === null) return;
+          const row = window.prompt("行号：1 / 2 / 3 / 4", current.row || "");
+          if (row === null) return;
+          const column = window.prompt("列标签或编号", current.column || "");
+          if (column === null) return;
+          editLocation.disabled = true;
+          try {
+            const payload = await api(`/api/admin/inventory/${item.id}`, { method: "PATCH", body: JSON.stringify({ storageLocation: { container, label, row, column } }) });
+            Object.assign(item, payload.item);
+            renderInventory();
+            setStatus(item.location ? `位置已更新：${item.location}` : "物资领取位置已清除");
+          } catch (error) { setStatus(error.message, true); }
+          finally { editLocation.disabled = false; }
+        });
         const archive = document.createElement("button");
         archive.type = "button";
         archive.className = "small-button";
         archive.textContent = item.status === "active" ? "归档" : "重新启用";
         archive.addEventListener("click", async () => {
+          archive.disabled = true;
           try {
             const payload = await api(`/api/admin/inventory/${item.id}`, { method: "PATCH", body: JSON.stringify({ status: item.status === "active" ? "archived" : "active" }) });
             Object.assign(item, payload.item);
             renderInventory();
           } catch (error) { setStatus(error.message, true); }
+          finally { archive.disabled = false; }
         });
         const restock = document.createElement("button");
         restock.type = "button";
@@ -939,10 +1655,12 @@
           if (!quantity) return;
           const reason = window.prompt("入库原因 / 来源");
           if (!reason) return;
+          restock.disabled = true;
           try { const payload = await api(`/api/admin/inventory/${item.id}/restock`, { method: "POST", body: JSON.stringify({ quantity, reason }) }); Object.assign(item, payload.item); state.inventory = await api("/api/admin/inventory"); renderInventory(); }
           catch (error) { setStatus(error.message, true); }
+          finally { restock.disabled = false; }
         });
-        actions.append(archive, restock);
+        actions.append(editLocation, archive, restock);
         if (state.user.role === "owner") {
           const remove = document.createElement("button");
           remove.type = "button";
@@ -950,20 +1668,22 @@
           remove.textContent = "删除";
           remove.addEventListener("click", async () => {
             if (!window.confirm(`确认删除材料“${item.name}”？剩余 ${item.quantity} ${item.unit} 将记为库存核销，历史流水会保留。`)) return;
+            remove.disabled = true;
             try {
               await api(`/api/admin/inventory/${item.id}`, { method: "DELETE" });
               state.inventory = await api("/api/admin/inventory");
               renderInventory();
               setStatus("MATERIAL DELETED / LEDGER PRESERVED");
             } catch (error) { setStatus(error.message, true); }
+            finally { remove.disabled = false; }
           });
           actions.appendChild(remove);
         }
       }
-      article.append(code, title, meta, value, actions);
+      article.append(code, title, media, meta, value, actions);
       list.appendChild(article);
     });
-    if (!state.inventory.items.length) list.textContent = "NO MATERIALS / 暂无物资";
+    if (!filteredItems.length) list.textContent = state.inventory.items.length ? "NO MATCHING MATERIALS / 没有匹配物资" : "NO MATERIALS / 暂无物资";
     renderLedger(document.querySelector("#inventoryLedger"), state.inventory.ledger, "quantity", "unit");
   }
 
@@ -993,11 +1713,13 @@
         archive.className = "small-button";
         archive.textContent = account.status === "active" ? "归档" : "重新启用";
         archive.addEventListener("click", async () => {
+          archive.disabled = true;
           try {
             const payload = await api(`/api/admin/funds/${account.id}`, { method: "PATCH", body: JSON.stringify({ status: account.status === "active" ? "archived" : "active" }) });
             Object.assign(account, payload.account);
             renderFunds();
           } catch (error) { setStatus(error.message, true); }
+          finally { archive.disabled = false; }
         });
         const topup = document.createElement("button");
         topup.type = "button";
@@ -1008,8 +1730,10 @@
           if (!amount) return;
           const reason = window.prompt("入账来源 / 原因");
           if (!reason) return;
+          topup.disabled = true;
           try { const payload = await api(`/api/admin/funds/${account.id}/topup`, { method: "POST", body: JSON.stringify({ amount, reason }) }); Object.assign(account, payload.account); state.funds = await api("/api/admin/funds"); renderFunds(); }
           catch (error) { setStatus(error.message, true); }
+          finally { topup.disabled = false; }
         });
         const remove = document.createElement("button");
         remove.type = "button";
@@ -1017,12 +1741,14 @@
         remove.textContent = "删除";
         remove.addEventListener("click", async () => {
           if (!window.confirm(`确认删除资金账户“${account.name}”？剩余 ${Number(account.balance).toFixed(2)} ${account.currency} 将记为余额核销，历史流水会保留。`)) return;
+          remove.disabled = true;
           try {
             await api(`/api/admin/funds/${account.id}`, { method: "DELETE" });
             state.funds = await api("/api/admin/funds");
             renderFunds();
             setStatus("FUND ACCOUNT DELETED / LEDGER PRESERVED");
           } catch (error) { setStatus(error.message, true); }
+          finally { remove.disabled = false; }
         });
         actions.append(archive, topup, remove);
       }
@@ -1067,12 +1793,22 @@
       code.textContent = `${usageRequest.id}\n${new Date(usageRequest.createdAt).toLocaleString("zh-CN")}`;
       identity.append(title, code);
       const target = document.createElement("p");
-      target.textContent = `${usageRequest.type === "material" ? "材料" : "资金"}\n${usageRequest.targetName}\n${usageRequest.type === "material" ? `${usageRequest.quantity} ${usageRequest.unit}` : `${Number(usageRequest.amount).toFixed(2)} ${usageRequest.currency}`}`;
+      target.textContent = `${usageRequest.type === "material" ? "材料" : "资金"}\n${usageRequest.targetName}\n${usageRequest.type === "material" ? `${usageRequest.quantity} ${usageRequest.unit}` : `${Number(usageRequest.amount).toFixed(2)} ${usageRequest.currency}`}${usageRequest.projectWorkspaceName ? `\n项目：${usageRequest.projectWorkspaceName}` : ""}`;
       const purpose = document.createElement("p");
-      purpose.textContent = `${usageRequest.purpose}\n\n状态：${usageRequest.status}${usageRequest.reviewNote ? `\n意见：${usageRequest.reviewNote}` : ""}`;
+      purpose.textContent = `${usageRequest.purpose}\n\n状态：${usageRequest.status}${usageRequest.reviewNote ? `\n意见：${usageRequest.reviewNote}` : ""}${usageRequest.pickupInstruction ? `\n领取：${usageRequest.pickupInstruction}` : ""}`;
       purpose.classList.add(`status-${usageRequest.status}`);
       const actions = document.createElement("div");
       actions.className = "usage-card__actions";
+      [[usageRequest.componentImage, "查看元器件图"], [usageRequest.locationImage, "查看位置图"]].forEach(([value, label]) => {
+        const url = safeUrl(value);
+        if (!url) return;
+        const view = document.createElement("button");
+        view.type = "button";
+        view.className = "small-button";
+        view.textContent = label;
+        view.addEventListener("click", () => openImageViewer(url, `${usageRequest.targetName} / ${label}`));
+        actions.appendChild(view);
+      });
       if (usageRequest.status === "pending" && ["owner", "reviewer"].includes(state.user.role)) {
         const note = document.createElement("textarea");
         note.placeholder = "审批意见（可选）";
@@ -1085,15 +1821,26 @@
         reject.className = "danger-button";
         reject.textContent = "拒绝";
         const decide = async (decision) => {
+          approve.disabled = true;
+          reject.disabled = true;
+          let committed = false;
           try {
             const payload = await api(`/api/admin/usage-requests/${usageRequest.id}`, { method: "PATCH", body: JSON.stringify({ decision, reviewNote: note.value }) });
             Object.assign(usageRequest, payload.request);
-            if (canAccessPanel("inventory")) { state.inventory = await api("/api/admin/inventory"); renderInventory(); }
-            if (canAccessPanel("funds")) { state.funds = await api("/api/admin/funds"); renderFunds(); }
+            committed = true;
             renderUsageRequests();
             setStatus(payload.notified ? "DECISION SAVED / RESULT EMAIL SENT" : "DECISION SAVED / RESULT EMAIL NOT SENT", !payload.notified);
+            const refreshes = [];
+            if (canAccessPanel("inventory")) refreshes.push(api("/api/admin/inventory").then((value) => { state.inventory = value; renderInventory(); }));
+            if (canAccessPanel("funds")) refreshes.push(api("/api/admin/funds").then((value) => { state.funds = value; renderFunds(); }));
+            const results = await Promise.allSettled(refreshes);
+            if (results.some((result) => result.status === "rejected")) setStatus("DECISION SAVED / 资源列表刷新失败", true);
           }
           catch (error) { setStatus(error.message, true); }
+          finally {
+            approve.disabled = committed;
+            reject.disabled = committed;
+          }
         };
         approve.addEventListener("click", () => decide("approved"));
         reject.addEventListener("click", () => decide("rejected"));
@@ -1132,6 +1879,7 @@
       element.querySelectorAll("input,textarea,select,button").forEach((control) => { control.disabled = role !== "owner"; if (role !== "owner" && control.type === "checkbox") control.checked = false; });
     });
     document.querySelectorAll("[data-inventory-edit]").forEach((element) => { element.hidden = !canAccessPanel("inventory") || !["owner", "editor"].includes(role); });
+    document.querySelector("#projectWorkspaceForm").hidden = !canAccessPanel("project-workspaces") || !["owner", "editor"].includes(role);
     document.querySelectorAll("[data-workspace-card]").forEach((card) => { card.hidden = !workspaces[card.dataset.workspaceCard].panels.some((panel) => canAccessPanel(panel)); });
     const requestedWorkspace = new URLSearchParams(window.location.search).get("workspace");
     state.workspace = workspaces[requestedWorkspace] ? requestedWorkspace : "home";
@@ -1207,6 +1955,14 @@
       if (sync.funds && (sync.funds.updatedAt || "") !== localFundUpdate) { state.funds = await api("/api/admin/funds"); renderFunds(); }
       const localUsageUpdate = state.usageRequests.reduce((latest, item) => (item.updatedAt || item.createdAt || "") > latest ? (item.updatedAt || item.createdAt || "") : latest, "");
       if (sync.usageRequests && (sync.usageRequests.total !== state.usageRequests.length || (sync.usageRequests.updatedAt || "") !== localUsageUpdate)) { state.usageRequests = await api("/api/admin/usage-requests"); renderUsageRequests(); }
+      if (canAccessPanel("project-workspaces")) {
+        const refreshForm = !state.projectWorkspaceFormDirty;
+        const editingId = document.querySelector("#projectWorkspaceForm").elements.id.value;
+        const applied = await loadProjectWorkspaces();
+        if (!applied) return;
+        renderProjectWorkspaces();
+        if (refreshForm && !state.projectWorkspaceFormDirty) populateProjectWorkspaceForm(state.projectWorkspaces.find((workspace) => workspace.id === editingId) || null);
+      }
       if (sync.audit?.latestId && sync.audit.latestId !== state.audit[0]?.id) {
         state.audit = await api("/api/admin/audit?limit=200");
         renderAudit();
@@ -1218,21 +1974,26 @@
 
   async function loadDashboard() {
     const isOwner = state.user?.role === "owner";
-    const [content, applications, mail, audit, managers, members, notificationAudience, resourceSecrets, notifications, memberMessages, inventory, funds, usageRequests, bugReports] = await Promise.all([
-      api("/api/admin/content"),
-      canAccessPanel("applications") ? api("/api/admin/applications") : Promise.resolve([]),
-      canAccessPanel("mail") ? api("/api/admin/mail") : Promise.resolve(null),
-      canAccessPanel("audit") ? api("/api/admin/audit?limit=200") : Promise.resolve([]),
-      isOwner ? api("/api/admin/managers") : Promise.resolve([]),
-      canAccessPanel("members") ? api("/api/admin/members") : Promise.resolve([]),
-      canAccessPanel("notifications") ? api("/api/admin/notification-audience") : Promise.resolve({ members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }),
-      canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role) ? api("/api/admin/resource-secrets", { method: "POST", body: "{}" }) : Promise.resolve({}),
-      canAccessPanel("notifications") ? api("/api/admin/notifications?limit=100") : Promise.resolve([]),
-      canAccessPanel("notifications") ? api("/api/admin/member-messages?limit=200") : Promise.resolve([]),
-      canAccessPanel("inventory") ? api("/api/admin/inventory") : Promise.resolve({ items: [], ledger: [] }),
-      canAccessPanel("funds") ? api("/api/admin/funds") : Promise.resolve({ accounts: [], ledger: [] }),
-      canAccessPanel("usage") ? api("/api/admin/usage-requests") : Promise.resolve([]),
-      api("/api/admin/bug-reports")
+    state.content = await api("/api/admin/content");
+    state.contentResourceDraftDirty = false;
+    state.loadErrors = {};
+    const [content, applications, mail, audit, managers, members, notificationAudience, resourceSecrets, notifications, memberMessages, uploads, inventory, funds, usageRequests, bugReports] = await Promise.all([
+      Promise.resolve(state.content),
+      optionalLoad("applications", canAccessPanel("applications"), () => api("/api/admin/applications"), []),
+      optionalLoad("mail", canAccessPanel("mail"), () => api("/api/admin/mail"), null),
+      optionalLoad("audit", canAccessPanel("audit"), () => api("/api/admin/audit?limit=200"), []),
+      optionalLoad("managers", isOwner, () => api("/api/admin/managers"), []),
+      optionalLoad("members", canAccessPanel("members"), () => api("/api/admin/members"), []),
+      optionalLoad("notificationAudience", canAccessPanel("notifications"), () => api("/api/admin/notification-audience"), { members: [], applicants: [], membersUpdatedAt: null, applicationsUpdatedAt: null }),
+      optionalLoad("resourceSecrets", canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role), () => api("/api/admin/resource-secrets", { method: "POST", body: "{}" }), {}),
+      optionalLoad("notifications", canAccessPanel("notifications"), () => api("/api/admin/notifications?limit=100"), []),
+      optionalLoad("memberMessages", canAccessPanel("notifications"), () => api("/api/admin/member-messages?limit=200"), []),
+      optionalLoad("uploads", canAccessPanel("uploads"), () => api("/api/admin/uploads"), []),
+      optionalLoad("inventory", canAccessPanel("inventory"), () => api("/api/admin/inventory"), { items: [], ledger: [] }),
+      optionalLoad("funds", canAccessPanel("funds"), () => api("/api/admin/funds"), { accounts: [], ledger: [] }),
+      optionalLoad("usageRequests", canAccessPanel("usage"), () => api("/api/admin/usage-requests"), []),
+      optionalLoad("bugReports", canAccessPanel("notifications"), () => api("/api/admin/bug-reports"), []),
+      optionalLoad("projectWorkspaces", canAccessPanel("project-workspaces"), loadProjectWorkspaces, false)
     ]);
     state.content = content;
     state.applications = applications;
@@ -1244,27 +2005,33 @@
     state.resourceSecrets = resourceSecrets;
     state.notifications = notifications;
     state.memberMessages = memberMessages;
+    state.uploads = uploads;
     state.inventory = inventory;
     state.funds = funds;
     state.usageRequests = usageRequests;
     state.bugReports = bugReports;
+    if (!canAccessPanel("project-workspaces")) applyProjectWorkspacePayload({ workspaces: [], members: [], inventory: { items: [] }, funds: { accounts: [] } });
+    state.projectWorkspacesError = state.loadErrors.projectWorkspaces || "";
     renderAllEditors();
     if (canAccessPanel("applications")) renderApplications();
     if (canAccessPanel("mail")) renderMail();
     if (isOwner) { renderManagers(); renderManagerFormAccess(); }
     if (canAccessPanel("members")) renderMembers();
     if (canAccessPanel("notifications")) renderNotifications();
+    if (canAccessPanel("uploads")) renderUploads();
     if (canAccessPanel("inventory")) renderInventory();
     if (canAccessPanel("funds")) renderFunds();
     if (canAccessPanel("usage")) renderUsageRequests();
+    if (canAccessPanel("project-workspaces")) { if (!state.projectWorkspaceFormDirty) populateProjectWorkspaceForm(); renderProjectWorkspaces(); }
     if (canAccessPanel("audit")) renderAudit();
-    renderBugReports();
+    if (canAccessPanel("notifications")) renderBugReports();
     applyRoleAccess();
     loginView.hidden = true;
     adminView.hidden = false;
     document.querySelector("#currentUser").textContent = `${state.user.displayName} / ${state.user.role.toUpperCase()}`;
     document.querySelector("#syncButton").hidden = true;
     if (!state.syncTimer) state.syncTimer = window.setInterval(checkRemoteUpdates, 12000);
+    showDashboardLoadErrors();
   }
 
   document.querySelector("#loginForm").addEventListener("submit", async (event) => {
@@ -1287,21 +2054,46 @@
     if (state.workspace !== "home") window.history.replaceState(null, "", `/admin.html?workspace=${state.workspace}#${button.dataset.panel}`);
   }));
   document.querySelectorAll(".save-button").forEach((button) => button.addEventListener("click", saveContent));
+  document.querySelector("#resourceEditor").addEventListener("input", () => { state.contentResourceDraftDirty = true; });
+  document.querySelector("#resourceEditor").addEventListener("change", () => { state.contentResourceDraftDirty = true; });
+  document.querySelector("#resourceEditor").addEventListener("click", (event) => { if (event.target.closest("button")) state.contentResourceDraftDirty = true; });
   document.querySelector("#adminProjectSearch").addEventListener("input", filterProjectEditor);
   document.querySelector("#adminProjectCategory").addEventListener("change", filterProjectEditor);
-  document.querySelector("#addProject").addEventListener("click", () => { state.content = collectContent(); state.content.projects.push({ id: "", title: "新项目", category: "未分类", description: "", tags: [], color: "#b8ff3d", video: "", poster: "", links: [] }); document.querySelector("#adminProjectSearch").value = ""; document.querySelector("#adminProjectCategory").value = ""; renderProjects(); });
+  document.querySelector("#addProject").addEventListener("click", () => { state.content = collectContent(); if (state.content.projects.length >= 100) { setStatus("公开项目最多 100 个", true); return; } state.content.projects.push({ id: "", title: "新项目", category: "未分类", description: "", tags: [], color: "#b8ff3d", video: "", poster: "", links: [] }); document.querySelector("#adminProjectSearch").value = ""; document.querySelector("#adminProjectCategory").value = ""; renderProjects(); });
+  document.querySelector("#addAchievement").addEventListener("click", () => { state.content = collectContent(); state.content.achievements ||= []; if (state.content.achievements.length >= 100) { setStatus("成果展示最多 100 项", true); return; } state.content.achievements.push({ id: "", title: "新成果", type: "项目成果", description: "", date: "", projectId: "", image: "", url: "" }); renderAchievements(); });
   document.querySelector("#addDepartment").addEventListener("click", () => { state.content = collectContent(); state.content.departments.push({ id: "", name: "新部门", description: "", isOpen: true }); renderDepartments(); });
-  document.querySelector("#addResource").addEventListener("click", () => { state.content = collectContent(); state.content.resources.push({ id: "", title: "新资源", description: "", type: "WEBSITE", url: "", links: [], accessNote: "", permissionKey: "", accessSecret: "", children: [] }); renderResources(); });
+  document.querySelector("#addResource").addEventListener("click", () => { state.content = collectContent(); state.content.resources.push({ id: "", title: "新资源", description: "", type: "WEBSITE", url: "", links: [], accessNote: "", permissionKey: "", accessSecret: "", children: [] }); state.contentResourceDraftDirty = true; renderResources(); });
   document.querySelector("#refreshApplications").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.applications = await api("/api/admin/applications"); }, renderApplications, "APPLICATIONS REFRESHED"));
   document.querySelector("#refreshUsageRequests").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.usageRequests = await api("/api/admin/usage-requests"); }, renderUsageRequests, "USAGE REQUESTS REFRESHED"));
   document.querySelector("#refreshAudit").addEventListener("click", (event) => refreshPanel(event.currentTarget, async () => { state.audit = await api("/api/admin/audit?limit=200"); }, renderAudit, "AUDIT LOG REFRESHED"));
+  document.querySelector("#refreshProjectWorkspaces").addEventListener("click", async (event) => {
+    const form = document.querySelector("#projectWorkspaceForm");
+    const refreshForm = !state.projectWorkspaceFormDirty;
+    const editingId = form.elements.id.value;
+    if (!refreshForm && !window.confirm("刷新只更新工作区列表，当前未保存表单将保留。继续？")) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const applied = await loadProjectWorkspaces();
+      if (!applied) return;
+      renderProjectWorkspaces();
+      if (refreshForm && !state.projectWorkspaceFormDirty) populateProjectWorkspaceForm(state.projectWorkspaces.find((workspace) => workspace.id === editingId) || null);
+      setStatus("PROJECT WORKSPACES REFRESHED");
+    } catch (error) {
+      state.projectWorkspacesError = error.message;
+      renderProjectWorkspaces();
+      setStatus(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
   document.querySelector("#syncButton").addEventListener("click", async (event) => {
     if (!window.confirm("同步会重新读取服务器内容，尚未保存的本地修改会丢失。继续？")) return;
     const button = event.currentTarget;
     button.disabled = true;
     try {
       await loadDashboard();
-      setStatus("SYNC COMPLETE");
+      if (!Object.keys(state.loadErrors).length) setStatus("SYNC COMPLETE");
     } catch (error) {
       setStatus(error.message, true);
     } finally {
@@ -1339,6 +2131,7 @@
     try {
       const payload = await api("/api/admin/members", { method: "POST", body: JSON.stringify(values) });
       state.members.push(payload.member);
+      syncWorkspaceMemberOption(payload.member);
       renderMembers();
       if (state.user.role === "owner") renderManagerFormAccess();
       form.reset();
@@ -1350,18 +2143,156 @@
     event.preventDefault();
     const form = event.currentTarget;
     const message = document.querySelector("#inventoryMessage");
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
     message.textContent = "CREATING MATERIAL...";
-    try { const payload = await api("/api/admin/inventory", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); state.inventory.items.push(payload.item); state.inventory = await api("/api/admin/inventory"); renderInventory(); form.reset(); message.textContent = "MATERIAL CREATED"; }
+    try {
+      const formData = new FormData(form);
+      const componentFile = formData.get("componentImageFile");
+      const locationFile = formData.get("locationImageFile");
+      const values = Object.fromEntries(formData.entries());
+      delete values.componentImageFile;
+      delete values.locationImageFile;
+      if (componentFile?.size || locationFile?.size) message.textContent = "UPLOADING MATERIAL IMAGES...";
+      const [componentUpload, locationUpload] = await Promise.all([
+        componentFile?.size ? uploadInventoryImage(componentFile) : null,
+        locationFile?.size ? uploadInventoryImage(locationFile) : null
+      ]);
+      values.componentImage = componentUpload?.url || "";
+      values.locationImage = locationUpload?.url || "";
+      const payload = await api("/api/admin/inventory", { method: "POST", body: JSON.stringify(values) });
+      state.inventory.items.push(payload.item);
+      state.inventory = await api("/api/admin/inventory");
+      renderInventory();
+      form.reset();
+      message.textContent = "MATERIAL CREATED";
+    }
     catch (error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  document.querySelector("#inventorySearch").addEventListener("input", renderInventory);
+  document.querySelector("#inventoryCategory").addEventListener("change", renderInventory);
+  document.querySelector("#inventoryImportFile").addEventListener("change", () => {
+    inventoryImportGeneration += 1;
+    inventoryImportReady = false;
+    document.querySelector("#commitInventoryImport").disabled = true;
+    document.querySelector("#inventoryImportPreview").replaceChildren();
+    document.querySelector("#inventoryImportMessage").textContent = "请先解析并预览表格";
+  });
+  document.querySelector("#previewInventoryImport").addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try { await parseInventoryImport(false); }
+    catch (error) {
+      inventoryImportReady = false;
+      document.querySelector("#commitInventoryImport").disabled = true;
+      document.querySelector("#inventoryImportMessage").textContent = error.message;
+    } finally { event.currentTarget.disabled = false; }
+  });
+  document.querySelector("#inventoryImportForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!inventoryImportReady) return;
+    const button = document.querySelector("#commitInventoryImport");
+    const fileInput = document.querySelector("#inventoryImportFile");
+    button.disabled = true;
+    fileInput.disabled = true;
+    try {
+      const payload = await parseInventoryImport(true);
+      state.inventory = await api("/api/admin/inventory");
+      renderInventory();
+      inventoryImportReady = false;
+      event.currentTarget.reset();
+      document.querySelector("#inventoryImportPreview").replaceChildren();
+      document.querySelector("#inventoryImportMessage").textContent = `导入完成：${payload.count} 项物资已写入库存`;
+      setStatus(`INVENTORY IMPORTED / ${payload.count} ITEMS`);
+    } catch (error) {
+      document.querySelector("#inventoryImportMessage").textContent = error.message;
+      button.disabled = !inventoryImportReady;
+    } finally { fileInput.disabled = false; }
+  });
+  document.querySelector("#downloadInventoryTemplate").addEventListener("click", () => {
+    const csv = "\uFEFF材料名称,SKU,分类,单位,初始数量,单位成本,收纳容器,位置标签,行,列,备注\n温湿度传感器,SENSOR-001,传感器,个,10,12.5,收纳盒,传感器,1,1,示例数据\n核心板,BOARD-001,核心板,块,5,88,收纳盒,核心板,2,1,\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "物资导入模板.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   });
 
   document.querySelector("#fundForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const message = document.querySelector("#fundMessage");
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
     message.textContent = "CREATING FUND ACCOUNT...";
     try { const payload = await api("/api/admin/funds", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); state.funds.accounts.push(payload.account); state.funds = await api("/api/admin/funds"); renderFunds(); form.reset(); message.textContent = "FUND ACCOUNT CREATED"; }
     catch (error) { message.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+
+  document.querySelector("#projectWorkspaceMembers").addEventListener("change", syncProjectLeaderChoices);
+  document.querySelector("#projectWorkspaceForm").addEventListener("input", () => { state.projectWorkspaceFormDirty = true; });
+  document.querySelector("#projectWorkspaceForm").addEventListener("change", () => { state.projectWorkspaceFormDirty = true; });
+  document.querySelector("#addProjectAllocation").addEventListener("click", () => {
+    addProjectAllocationRow();
+    state.projectWorkspaceFormDirty = true;
+  });
+  document.querySelector("#cancelProjectWorkspaceEdit").addEventListener("click", resetProjectWorkspaceForm);
+  document.querySelector("#projectWorkspaceForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const message = document.querySelector("#projectWorkspaceMessage");
+    const id = form.elements.id.value;
+    const memberIds = [...form.elements.memberIds.selectedOptions].map((option) => option.value);
+    const managerIds = [...form.elements.managerIds.selectedOptions].map((option) => option.value);
+    if (!memberIds.length || !managerIds.length || managerIds.some((managerId) => !memberIds.includes(managerId))) {
+      message.textContent = "请至少选择一名成员和负责人，且负责人必须属于项目成员。";
+      return;
+    }
+    const allocations = [...document.querySelectorAll("#projectAllocationRows .project-allocation-row")].map((row) => ({
+      id: row.dataset.allocationId || undefined,
+      type: row.querySelector('[data-allocation-field="type"]').value,
+      targetId: row.querySelector('[data-allocation-field="targetId"]').value,
+      allocated: Number(row.querySelector('[data-allocation-field="allocated"]').value),
+      note: row.querySelector('[data-allocation-field="note"]').value
+    })).filter((allocation) => allocation.targetId);
+    const payload = {
+      name: form.elements.name.value,
+      projectId: form.elements.projectId.value || null,
+      description: form.elements.description.value,
+      status: form.elements.status.value,
+      revision: Number(form.elements.revision.value) || 0,
+      memberIds,
+      managerIds,
+      allocations
+    };
+    button.disabled = true;
+    message.textContent = id ? "SAVING PROJECT WORKSPACE..." : "CREATING PROJECT WORKSPACE...";
+    try {
+      const result = await api(id ? `/api/admin/project-workspaces/${encodeURIComponent(id)}` : "/api/admin/project-workspaces", { method: id ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      const workspace = result.projectWorkspace || result.workspace || result.item;
+      if (workspace) {
+        const index = state.projectWorkspaces.findIndex((item) => item.id === workspace.id);
+        if (index >= 0) state.projectWorkspaces[index] = workspace;
+        else state.projectWorkspaces.unshift(workspace);
+      } else {
+        await loadProjectWorkspaces();
+      }
+      state.projectWorkspacesError = "";
+      delete state.loadErrors.projectWorkspaces;
+      renderProjectWorkspaces();
+      resetProjectWorkspaceForm();
+      const mailStatus = leadNotificationStatus(result.leadNotification, Boolean(id));
+      message.textContent = `${id ? "PROJECT WORKSPACE SAVED" : "PROJECT WORKSPACE CREATED"}${mailStatus.text}`;
+      setStatus(message.textContent, mailStatus.warning);
+    } catch (error) {
+      message.textContent = error.status === 409 ? `REVISION ${form.elements.revision.value} CONFLICT / ${error.message}。请刷新列表并重新点击编辑后重试。` : error.message;
+      if (error.status === 409) setStatus("PROJECT WORKSPACE REVISION CONFLICT / 请刷新", true);
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.querySelector("#notificationForm").addEventListener("change", updateNotificationSummary);
@@ -1405,12 +2336,24 @@
     try {
       const payload = await api("/api/admin/upload", { method: "POST", body });
       document.querySelector("#uploadUrl").value = payload.url;
+      if (payload.file) state.uploads.unshift(payload.file);
+      renderUploads();
       message.textContent = "UPLOAD COMPLETE";
     } catch (error) {
       message.textContent = error.message;
     }
   });
   document.querySelector("#copyUploadUrl").addEventListener("click", () => navigator.clipboard.writeText(document.querySelector("#uploadUrl").value));
+  document.querySelector("#refreshUploads").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      state.uploads = await api("/api/admin/uploads");
+      renderUploads();
+      setStatus("UPLOAD LIBRARY REFRESHED");
+    } catch (error) { setStatus(error.message, true); }
+    finally { button.disabled = false; }
+  });
 
   document.querySelector("#saveMailButton").addEventListener("click", async () => {
     const message = document.querySelector("#mailMessage");

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Tech Club CMS backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+Unit=tech-club-backup.service
+
+[Install]
+WantedBy=timers.target

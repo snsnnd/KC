@@ -8,3 +8,5 @@ docs/TEST_ACCOUNTS.md
 *.log
 .ssh-askpass.sh
 .DS_Store
+backups/
+*.宝塔密码

@@ -10,6 +10,63 @@
   const status = document.querySelector("#approvalStatus");
   let approval = null;
 
+  function openImageViewer(value, title) {
+    if (!String(value || "").startsWith("/uploads/")) return;
+    const previousFocus = document.activeElement;
+    const viewer = document.createElement("div");
+    viewer.className = "image-viewer";
+    viewer.setAttribute("role", "dialog");
+    viewer.setAttribute("aria-modal", "true");
+    viewer.setAttribute("aria-labelledby", "approvalImageViewerTitle");
+    const panel = document.createElement("div");
+    panel.className = "image-viewer__panel";
+    const heading = document.createElement("div");
+    const label = document.createElement("b");
+    label.id = "approvalImageViewerTitle";
+    label.textContent = title;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "关闭 ×";
+    const image = document.createElement("img");
+    image.src = value;
+    image.alt = title;
+    const dismiss = () => { viewer.remove(); previousFocus?.focus?.(); };
+    close.addEventListener("click", dismiss);
+    viewer.addEventListener("click", (event) => { if (event.target === viewer) dismiss(); });
+    viewer.addEventListener("keydown", (event) => { if (event.key === "Escape") dismiss(); if (event.key === "Tab") { event.preventDefault(); close.focus(); } });
+    heading.append(label, close);
+    panel.append(heading, image);
+    viewer.appendChild(panel);
+    document.body.appendChild(viewer);
+    close.focus();
+  }
+
+  function renderResultMedia(requestData) {
+    const container = document.querySelector("#approvalResultMedia");
+    container.replaceChildren();
+    [[requestData?.componentImage, "查看元器件图片"], [requestData?.locationImage, "查看领取位置图片"]].forEach(([url, label]) => {
+      if (!String(url || "").startsWith("/uploads/")) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => openImageViewer(url, label));
+      container.appendChild(button);
+    });
+  }
+
+  function renderPreviewMedia(approvalData) {
+    const container = document.querySelector("#approvalPreviewMedia");
+    container.replaceChildren();
+    [[approvalData?.componentImage, "查看元器件图片"], [approvalData?.locationImage, "查看领取位置图片"]].forEach(([url, label]) => {
+      if (!String(url || "").startsWith("/uploads/")) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => openImageViewer(url, label));
+      container.appendChild(button);
+    });
+  }
+
   async function request(path, body) {
     const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const payload = await response.json().catch(() => ({}));
@@ -49,6 +106,7 @@
     document.querySelector("#approvalExpires").textContent = new Date(approval.expiresAt).toLocaleString("zh-CN");
     document.querySelector("#approvalConfirmText").textContent = isApprove ? "确认批准并执行" : "确认拒绝申请";
     document.querySelector("#approvalConfirm").classList.toggle("is-reject", !isApprove);
+    renderPreviewMedia(approval);
     loading.hidden = true;
     content.hidden = false;
   }
@@ -75,7 +133,10 @@
     try {
       const payload = await request(approvalKind === "application" ? "/api/application-email-approvals/confirm" : "/api/email-approvals/confirm", { token, reviewNote: document.querySelector("#approvalNote").value });
       token = "";
-      showResult(["approved", "accepted"].includes(payload.request.status) ? "申请已通过" : "申请已拒绝", `申请 ${payload.request.id} 已由 ${payload.request.reviewedBy} 通过邮件确认处理。${payload.notified ? "结果邮件已发送给申请人。" : "申请人未配置邮箱或邮件发送失败。"}`, true);
+      const reviewer = payload.request.reviewedBy?.displayName || payload.request.reviewedBy?.username || payload.request.reviewedBy || "管理员";
+      const pickup = payload.request.pickupInstruction ? ` ${payload.request.pickupInstruction}` : "";
+      showResult(["approved", "accepted"].includes(payload.request.status) ? "申请已通过" : "申请已拒绝", `申请 ${payload.request.id} 已由 ${reviewer} 通过邮件确认处理。${payload.notified ? "结果邮件已发送给申请人。" : "申请人未配置邮箱或邮件发送失败。"}${pickup}`, true);
+      renderResultMedia(payload.request);
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;

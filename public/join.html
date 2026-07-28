@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="description" content="申请加入科技创新社"><title>加入科技创新社 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=6"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="description" content="申请加入科技创新社"><title>加入科技创新社 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=15"></head>
 <body>
   <header class="sub-header"><a class="sub-brand" href="/"><i></i><span>TECH SYNERGY LAB</span></a><a href="/">← RETURN TO SYSTEM</a></header>
   <main>
@@ -12,7 +12,7 @@
       <form class="application-form" id="applicationForm">
         <label class="form-field">姓名<input name="name" minlength="2" maxlength="40" autocomplete="name" required></label>
         <label class="form-field">学号<input name="studentId" minlength="4" maxlength="30" autocomplete="off" required></label>
-        <label class="form-field">班级<input name="className" minlength="2" maxlength="60" placeholder="例如：计算机 2401 班" autocomplete="organization-title" required></label>
+        <label class="form-field">班级<input name="className" pattern="[0-9]{2}[\u3400-\u4DBF\u4E00-\u9FFF]+[0-9]{2}" maxlength="60" placeholder="例如：24通信01" title="请按“24通信01”填写：两位年份 + 中文专业 + 两位班号" autocomplete="organization-title" required></label>
         <label class="form-field">联系方式<input name="contact" minlength="3" maxlength="80" placeholder="微信或手机号" required></label>
         <label class="form-field">邮箱<input name="email" type="email" maxlength="120" autocomplete="email"></label>
         <label class="form-field form-field--wide">作品链接（可选）<input name="portfolio" type="url" maxlength="1000" placeholder="https://..."></label>
@@ -24,6 +24,7 @@
       </form>
     </section>
   </main>
+  <a class="bug-feedback-fab" href="/bug-report.html">BUG FEEDBACK / 问题反馈</a>
   <div class="orientation-guard"><div><i></i>ROTATE DEVICE<br>请使用竖屏获得最佳体验</div></div>
   <script src="assets/js/join.js?v=4"></script>
 </body></html>

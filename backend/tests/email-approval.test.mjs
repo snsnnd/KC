@@ -10,7 +10,7 @@ const dataDirectory = "/tmp/tech-club-email-approval-test";
 const ownerPassword = "isolated-owner-password";
 const reviewerPassword = "isolated-reviewer-password";
 const memberPassword = "isolated-member-password";
-const sessionSecret = "isolated-email-approval-secret";
+const sessionSecret = "isolated-email-approval-secret-at-least-32";
 const serverPath = fileURLToPath(new URL("../src/server.js", import.meta.url));
 
 await fs.rm(dataDirectory, { recursive: true, force: true });
@@ -72,7 +72,11 @@ try {
   const reviewerSession = await loginAdmin(reviewer.username, reviewerPassword);
   const reviewerNotifications = await request("/api/admin/notifications", { headers: { cookie: reviewerSession.cookie } });
   assert.equal(reviewerNotifications.response.status, 200);
-  const material = await request("/api/admin/inventory", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "邮件审批材料", unit: "件", quantity: 20 }) });
+  const imageForm = new FormData();
+  imageForm.append("file", new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")], { type: "image/png" }), "email-component.png");
+  const imageUpload = await request("/api/admin/inventory-image", { method: "POST", headers: { cookie: owner.cookie, "x-csrf-token": owner.csrf }, body: imageForm });
+  assert.equal(imageUpload.response.status, 201);
+  const material = await request("/api/admin/inventory", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "邮件审批材料", unit: "件", quantity: 20, locationContainer: "收纳盒", locationLabel: "邮件审批区", locationRow: "3", locationColumn: "B", componentImage: imageUpload.body.url, locationImage: imageUpload.body.url }) });
   const fund = await request("/api/admin/funds", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "邮件审批资金", currency: "CNY", balance: 1000 }) });
   const member = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "邮件申请成员", studentId: "20264002", email: "requester@example.com", departmentId: "software", permissions: ["material.request", "fund.request"] }) });
   assert.equal(material.response.status, 201);
@@ -115,6 +119,9 @@ try {
   assert.deepEqual(concurrentConfirmations.map((confirmation) => confirmation.response.status).sort(), [200, 410]);
   const confirmed = concurrentConfirmations.find((confirmation) => confirmation.response.status === 200);
   assert.equal(confirmed.body.request.reviewedVia, "email");
+  assert.equal(confirmed.body.request.pickupInstruction, "请去收纳盒的邮件审批区（3，B）获取。");
+  assert.equal(confirmed.body.request.componentImage, imageUpload.body.url);
+  assert.equal(confirmed.body.request.locationImage, imageUpload.body.url);
   inventory = await request("/api/admin/inventory", { headers: { cookie: owner.cookie } });
   assert.equal(inventory.body.items.find((item) => item.id === material.body.item.id).quantity, 17);
   const replay = await request("/api/email-approvals/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: approveToken }) });
@@ -133,7 +140,7 @@ try {
   const funds = await request("/api/admin/funds", { headers: { cookie: owner.cookie } });
   assert.equal(funds.body.accounts.find((account) => account.id === fund.body.account.id).balance, 875);
 
-  const joinApplication = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "邮件加入申请人", studentId: "20264003", className: "测试班级", contact: "join-contact", email: "joiner@example.com", departmentId: "software", motivation: "验证加入申请邮件快速审批流程", consent: "accepted" }) });
+  const joinApplication = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "邮件加入申请人", studentId: "20264003", className: "26通信01", contact: "join-contact", email: "joiner@example.com", departmentId: "software", motivation: "验证加入申请邮件快速审批流程", consent: "accepted" }) });
   assert.equal(joinApplication.response.status, 201);
   const applicationAcceptToken = rawToken(9);
   const applicationRejectToken = rawToken(10);

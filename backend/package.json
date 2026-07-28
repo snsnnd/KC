@@ -7,16 +7,20 @@
     "start": "node src/server.js",
     "check": "node --check src/server.js",
     "migrate": "node scripts/migrate-data.mjs",
+    "upload:project": "node scripts/upload-project.mjs",
     "test:resources": "node tests/resource-approval.test.mjs",
     "test:applications": "node tests/application-profile.test.mjs",
     "test:permissions": "node tests/member-visibility.test.mjs",
     "test:admin-scope": "node tests/admin-scope.test.mjs",
     "test:email-approval": "node tests/email-approval.test.mjs",
+    "test:project-workspace": "node tests/project-workspace.test.mjs",
     "test:smoke": "node tests/production-smoke.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
     "multer": "^2.0.2",
-    "nodemailer": "^9.0.3"
+    "nodemailer": "^9.0.3",
+    "read-excel-file": "^6.0.3",
+    "unzipper": "^0.12.5"
   }
 }

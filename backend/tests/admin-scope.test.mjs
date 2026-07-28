@@ -10,7 +10,7 @@ const scopedPassword = "isolated-scoped-password";
 const serverPath = fileURLToPath(new URL("../src/server.js", import.meta.url));
 
 await fs.rm(dataDirectory, { recursive: true, force: true });
-const server = spawn(process.execPath, [serverPath], { env: { ...process.env, PORT: "3104", DATA_DIR: dataDirectory, ADMIN_PASSWORD: ownerPassword, MANAGER_EMAIL: "owner@example.com", SESSION_SECRET: "isolated-admin-scope-secret", COOKIE_SECURE: "false" }, stdio: ["ignore", "pipe", "pipe"] });
+const server = spawn(process.execPath, [serverPath], { env: { ...process.env, PORT: "3104", DATA_DIR: dataDirectory, ADMIN_PASSWORD: ownerPassword, MANAGER_EMAIL: "owner@example.com", SESSION_SECRET: "isolated-admin-scope-secret-at-least-32", COOKIE_SECURE: "false" }, stdio: ["ignore", "pipe", "pipe"] });
 let serverErrors = "";
 server.stderr.on("data", (chunk) => { serverErrors += chunk; });
 
@@ -45,19 +45,26 @@ try {
   assert.ok(mail.body.applicationAcceptedSubject.includes("{申请编号}"));
   assert.ok(mail.body.applicationRejectedBody.includes("{审批意见}"));
 
+  const invalidClassMember = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "格式错误成员", studentId: "20263999", className: "测试班级", departmentId: "software", permissions: [] }) });
+  assert.equal(invalidClassMember.response.status, 400);
+  assert.equal(invalidClassMember.body.error, "班级格式无效，请按“24通信01”填写（两位年份 + 中文专业 + 两位班号）");
+
   const applications = [];
   for (const [departmentId, studentId] of [["software", "20260011"], ["hardware", "20260012"]]) {
-    const application = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `${departmentId} applicant`, studentId, className: "测试班级", contact: "test-contact", departmentId, motivation: "这是满足长度要求的申请理由", consent: "accepted" }) });
+    const application = await request("/api/applications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `${departmentId} applicant`, studentId, className: "26通信01", contact: "test-contact", departmentId, motivation: "这是满足长度要求的申请理由", consent: "accepted" }) });
     assert.equal(application.response.status, 201);
     applications.push(application.body.id);
   }
 
   const membersByDepartment = {};
   for (const [departmentId, studentId] of [["software", "20263001"], ["hardware", "20263002"]]) {
-    const member = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: `${departmentId} member`, studentId, departmentId, permissions: [] }) });
+    const member = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: `${departmentId} member`, studentId, className: "26通信01", departmentId, permissions: [] }) });
     assert.equal(member.response.status, 201);
     membersByDepartment[departmentId] = member.body;
   }
+  const duplicateStudent = await request("/api/admin/members", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ name: "重复学号成员", studentId: "20263001", className: "26通信01", departmentId: "hardware", permissions: [] }) });
+  assert.equal(duplicateStudent.response.status, 409);
+  assert.equal(duplicateStudent.body.error, "该学号已绑定其他成员账号");
 
   const prematureManager = await request("/api/admin/managers", { method: "POST", headers: ownerHeaders, body: JSON.stringify({ memberId: membersByDepartment.software.member.id, role: "editor", panelPermissions: ["applications", "members"], departmentIds: ["software"] }) });
   assert.equal(prematureManager.response.status, 409);
@@ -80,6 +87,8 @@ try {
   assert.deepEqual(scoped.user.departmentIds, ["software"]);
   const linkedIdentityUpdate = await request(`/api/admin/members/${membersByDepartment.software.member.id}`, { method: "PATCH", headers: scopedHeaders, body: JSON.stringify({ status: "suspended" }) });
   assert.equal(linkedIdentityUpdate.response.status, 403);
+  const invalidClassUpdate = await request(`/api/admin/members/${membersByDepartment.software.member.id}`, { method: "PATCH", headers: scopedHeaders, body: JSON.stringify({ className: "软件一班" }) });
+  assert.equal(invalidClassUpdate.response.status, 400);
 
   const softwareMemberLogin = await request("/api/member/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: membersByDepartment.software.member.username, password: scopedPassword }) });
   const softwareMemberCookie = softwareMemberLogin.response.headers.getSetCookie()[0].split(";", 1)[0];

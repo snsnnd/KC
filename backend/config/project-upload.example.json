@@ -1,0 +1,21 @@
+{
+  "id": "SYS_004",
+  "title": "智能巡检车",
+  "category": "机器人",
+  "description": "用于室内环境巡检的移动机器人项目。",
+  "tags": ["ROS2", "SLAM", "ESP32"],
+  "color": "#b8ff3d",
+  "posterFile": "./media/inspection-car.webp",
+  "videoFile": "./media/inspection-car.mp4",
+  "links": [
+    { "label": "项目仓库", "url": "https://example.com/repository" },
+    { "label": "演示文档", "url": "https://example.com/docs" }
+  ],
+  "achievement": {
+    "id": "ACH_004",
+    "title": "智能巡检车完成实地测试",
+    "type": "技术作品",
+    "description": "完成室内地图构建、自动巡检和异常点上报。",
+    "date": "2026"
+  }
+}

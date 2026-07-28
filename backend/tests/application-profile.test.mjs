@@ -15,7 +15,7 @@ const server = spawn(process.execPath, [serverPath], {
     PORT: "3102",
     DATA_DIR: dataDirectory,
     ADMIN_PASSWORD: adminPassword,
-    SESSION_SECRET: "isolated-application-profile-test-secret",
+    SESSION_SECRET: "isolated-application-profile-test-secret-at-least-32",
     COOKIE_SECURE: "false"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -58,8 +58,8 @@ try {
       body: JSON.stringify({ name: "测试成员", studentId: "20260001", contact: "test-contact", departmentId: "software", motivation: "这是完整长度的申请理由", consent: "accepted" })
     });
     assert.equal(incomplete.response.status, 400);
-    assert.equal(incomplete.body.error, "请检查：班级至少填写 2 个字符");
-    assert.deepEqual(incomplete.body.validationErrors, ["班级至少填写 2 个字符"]);
+    assert.equal(incomplete.body.error, "请检查：班级格式无效，请按“24通信01”填写（两位年份 + 中文专业 + 两位班号）");
+    assert.deepEqual(incomplete.body.validationErrors, ["班级格式无效，请按“24通信01”填写（两位年份 + 中文专业 + 两位班号）"]);
   }
 
   const multipleInvalidFields = await request("/api/applications", {
@@ -71,7 +71,7 @@ try {
   assert.deepEqual(multipleInvalidFields.body.validationErrors, [
     "姓名至少填写 2 个字符",
     "学号至少填写 4 个字符",
-    "班级至少填写 2 个字符",
+    "班级格式无效，请按“24通信01”填写（两位年份 + 中文专业 + 两位班号）",
     "联系方式至少填写 3 个字符",
     "请选择当前开放的部门",
     "申请理由至少填写 10 个字符"
@@ -80,7 +80,7 @@ try {
   const missingConsent = await request("/api/applications", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "计算机 2601 班", contact: "test-contact", departmentId: "software", motivation: "这是完整长度的申请理由" })
+    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "26计算机01", contact: "test-contact", departmentId: "software", motivation: "这是完整长度的申请理由" })
   });
   assert.equal(missingConsent.response.status, 400);
   assert.deepEqual(missingConsent.body.validationErrors, ["请确认同意招新信息使用说明"]);
@@ -88,7 +88,7 @@ try {
   const submitted = await request("/api/applications", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "计算机 2601 班", contact: "test-contact", email: "student@example.com", departmentId: "software", motivation: "这是完整长度的申请理由", consent: "accepted" })
+    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "26计算机01", contact: "test-contact", email: "student@example.com", departmentId: "software", motivation: "这是完整长度的申请理由", consent: "accepted" })
   });
   assert.equal(submitted.response.status, 201);
 
@@ -96,21 +96,21 @@ try {
     const repeated = await request("/api/applications", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "计算机 2601 班", contact: "test-contact", departmentId: "software", motivation: `重复提交测试理由 ${attempt}`, consent: "accepted" })
+      body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "26计算机01", contact: "test-contact", departmentId: "software", motivation: `重复提交测试理由 ${attempt}`, consent: "accepted" })
     });
     assert.equal(repeated.response.status, 201);
   }
   const limited = await request("/api/applications", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "计算机 2601 班", contact: "test-contact", departmentId: "software", motivation: "第四次重复提交应被限制", consent: "accepted" })
+    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "26计算机01", contact: "test-contact", departmentId: "software", motivation: "第四次重复提交应被限制", consent: "accepted" })
   });
   assert.equal(limited.response.status, 429);
   const firstRetryAfter = Number(limited.response.headers.get("retry-after"));
   const retriedLimit = await request("/api/applications", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "计算机 2601 班", contact: "test-contact", departmentId: "software", motivation: "限流后重试不应延长等待时间", consent: "accepted" })
+    body: JSON.stringify({ name: "测试成员", studentId: "20260001", className: "26计算机01", contact: "test-contact", departmentId: "software", motivation: "限流后重试不应延长等待时间", consent: "accepted" })
   });
   assert.equal(retriedLimit.response.status, 429);
   assert.ok(Number(retriedLimit.response.headers.get("retry-after")) <= firstRetryAfter);
@@ -119,7 +119,7 @@ try {
     const sharedNetwork = await request("/api/applications", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: `共享网络成员 ${applicant}`, studentId: `2026000${applicant}`, className: "计算机 2601 班", contact: `contact-${applicant}`, departmentId: "software", motivation: "共享出口网络不应互相占用申请人额度", consent: "accepted" })
+      body: JSON.stringify({ name: `共享网络成员 ${applicant}`, studentId: `2026000${applicant}`, className: "26计算机01", contact: `contact-${applicant}`, departmentId: "software", motivation: "共享出口网络不应互相占用申请人额度", consent: "accepted" })
     });
     assert.equal(sharedNetwork.response.status, 201);
   }
@@ -136,7 +136,7 @@ try {
   const applications = await request("/api/admin/applications", { headers: { cookie } });
   const application = applications.body.find((item) => item.id === submitted.body.id);
   assert.equal(application.studentId, "20260001");
-  assert.equal(application.className, "计算机 2601 班");
+  assert.equal(application.className, "26计算机01");
   const approvedApplication = await request(`/api/admin/applications/${application.id}`, { method: "PATCH", headers, body: JSON.stringify({ status: "accepted", reviewNote: "资料审核通过" }) });
   assert.equal(approvedApplication.response.status, 200);
 
@@ -149,7 +149,7 @@ try {
   assert.deepEqual(promotionResults.map((result) => result.response.status).sort(), [201, 409]);
   const promoted = promotionResults.find((result) => result.response.status === 201);
   assert.equal(promoted.body.member.studentId, "20260001");
-  assert.equal(promoted.body.member.className, "计算机 2601 班");
+  assert.equal(promoted.body.member.className, "26计算机01");
   assert.equal(promoted.body.member.username, "S20260001");
   assert.equal(promoted.body.member.mustChangePassword, true);
   const activationFile = await fs.readFile(`${dataDirectory}/member-activation-codes.json`, "utf8");

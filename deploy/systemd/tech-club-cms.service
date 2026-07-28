@@ -4,18 +4,42 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=root
+Group=root
+UMask=0077
 WorkingDirectory=/opt/tech-club-cms
 EnvironmentFile=/etc/tech-club-cms.env
 ExecStart=/usr/bin/node /opt/tech-club-cms/src/server.js
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=30s
+StateDirectory=tech-club
+StateDirectoryMode=0751
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/tech-club
+CapabilityBoundingSet=
+AmbientCapabilities=
+TasksMax=128
+LimitNOFILE=16384
+MemoryMax=512M
+CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target

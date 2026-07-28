@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>成员中心 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=10"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08080a"><meta name="robots" content="noindex,nofollow"><title>成员中心 | Tech Synergy Lab</title><link rel="stylesheet" href="assets/css/subpage.css?v=15"></head>
 <body>
   <header class="sub-header"><a class="sub-brand" href="/portal.html"><i></i><span>MEMBER WORKSPACE</span></a><div class="member-header"><span id="memberIdentity">MEMBER ACCESS</span><button id="memberLogout" type="button" hidden>退出</button><a href="/portal.html">统一入口 →</a></div></header>
   <main>
@@ -24,9 +24,10 @@
           <dl><dt>ACCOUNT</dt><dd id="memberUsername"></dd><dt>STUDENT</dt><dd id="memberStudent"></dd><dt>PERMISSIONS</dt><dd id="memberPermissions"></dd></dl>
         </div>
         <button class="is-active" data-member-view="resources"><span>01</span>我的内部资源</button>
-        <button data-member-view="requests"><span>02</span>材料与资金申请</button>
-        <button data-member-view="messages"><span>03</span>联系管理员</button>
-        <button data-member-view="settings"><span>04</span>账号安全</button>
+        <button data-member-view="project-workspaces"><span>02</span>项目协作</button>
+        <button data-member-view="requests"><span>03</span>材料与资金申请</button>
+        <button data-member-view="messages"><span>04</span>联系管理员</button>
+        <button data-member-view="settings"><span>05</span>账号安全</button>
       </aside>
       <div class="member-content">
         <section class="member-panel is-active" data-member-panel="resources">
@@ -39,27 +40,39 @@
           <div class="member-resource-list" id="memberResources"></div>
           <p class="member-empty-state" id="memberResourcesEmpty" hidden>当前没有可访问的内部资源。你的账号可能尚未被授予任何资源权限。</p>
         </section>
+        <section class="member-panel" data-member-panel="project-workspaces">
+          <div class="member-panel__head member-panel__head--actions"><div><span class="sub-kicker">// INTEGRATED PROJECT OPERATIONS</span><h2>项目协作</h2></div><button class="member-quiet-button" id="refreshProjectWorkspaces" type="button">刷新工作区</button></div>
+          <p class="member-module-status" id="memberProjectWorkspaceStatus" role="status"></p>
+          <div class="member-workspace-list" id="memberProjectWorkspaces"></div>
+        </section>
         <section class="member-panel" data-member-panel="requests">
           <div class="member-panel__head"><div><span class="sub-kicker">// APPROVAL GATE</span><h2>材料与资金申请</h2></div></div>
           <div class="request-form-grid">
             <form class="application-form member-request-form" id="materialRequestForm" hidden>
               <h3>材料使用申请</h3>
+              <label class="form-field">关联项目（可选）<select class="project-request-select" name="projectWorkspaceId"><option value="">不关联项目</option></select></label>
+              <div class="material-filter"><input id="materialSearch" type="search" aria-label="搜索材料名称或 SKU" placeholder="搜索材料名称或 SKU"><select id="materialCategory" aria-label="按材料分类筛选"><option value="">全部分类</option></select></div>
               <label class="form-field">材料<select id="materialTarget" name="targetId" required></select></label>
+              <div class="material-preview" id="materialPreview" hidden></div>
               <label class="form-field">数量<input name="quantity" type="number" min="0.01" step="0.01" required></label>
               <label class="form-field">使用目的<textarea name="purpose" minlength="5" maxlength="1000" required></textarea></label>
+              <p class="request-availability" data-availability></p>
               <button class="submit-button" type="submit">SUBMIT MATERIAL REQUEST <span>→</span></button>
               <p class="form-status" data-status role="status"></p>
             </form>
             <form class="application-form member-request-form" id="fundRequestForm" hidden>
               <h3>资金使用申请</h3>
+              <label class="form-field">关联项目（可选）<select class="project-request-select" name="projectWorkspaceId"><option value="">不关联项目</option></select></label>
               <label class="form-field">资金账户<select id="fundTarget" name="targetId" required></select></label>
               <label class="form-field">金额<input name="amount" type="number" min="0.01" step="0.01" required></label>
               <label class="form-field">使用目的<textarea name="purpose" minlength="5" maxlength="1000" required></textarea></label>
+              <p class="request-availability" data-availability></p>
               <button class="submit-button" type="submit">SUBMIT FUND REQUEST <span>→</span></button>
               <p class="form-status" data-status role="status"></p>
             </form>
           </div>
           <div class="member-section-title" id="memberHistoryTitle" hidden><div><span class="sub-kicker">// REQUEST HISTORY</span><h2>我的申请</h2></div></div>
+          <p class="member-module-status" id="memberRequestStatus" role="status"></p>
           <div class="member-request-list" id="memberRequestList"></div>
           <p class="member-empty-state" id="memberRequestsEmpty" hidden>暂无使用申请记录。</p>
         </section>
@@ -85,6 +98,7 @@
       </div>
     </div>
   </main>
-  <script src="assets/js/member.js?v=14"></script>
+  <a class="bug-feedback-fab" href="/bug-report.html">BUG FEEDBACK / 问题反馈</a>
+  <script src="assets/js/member.js?v=19"></script>
 </body>
 </html>

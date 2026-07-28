@@ -209,6 +209,59 @@
   projectSearch.addEventListener("input", applyProjectFilters);
   applyProjectFilters();
 
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const configuredAchievements = Array.isArray(data.achievements) ? data.achievements : [];
+  const achievements = configuredAchievements.length ? configuredAchievements : projects.slice(0, 8).map((project, index) => ({
+    id: `PROJECT_${String(index + 1).padStart(2, "0")}`,
+    title: project.title,
+    type: project.category || "项目成果",
+    description: project.description,
+    projectId: project.id,
+    image: project.poster || "",
+    url: (project.links || []).find((link) => link.url)?.url || ""
+  }));
+  const achievementList = document.querySelector("#achievementList");
+  achievements.forEach((achievement, index) => {
+    const relatedProject = projectById.get(achievement.projectId);
+    const article = document.createElement("article");
+    article.className = "achievement-card";
+    const media = document.createElement("div");
+    media.className = "achievement-card__media";
+    const imageUrl = achievement.image || relatedProject?.poster || "";
+    if (imageUrl) {
+      const image = document.createElement("img");
+      image.src = imageUrl;
+      image.alt = achievement.title;
+      image.loading = "lazy";
+      media.appendChild(image);
+    } else {
+      const marker = document.createElement("span");
+      marker.textContent = String(index + 1).padStart(2, "0");
+      media.appendChild(marker);
+    }
+    const meta = document.createElement("div");
+    meta.className = "achievement-card__meta mono";
+    meta.textContent = `${achievement.type || "项目成果"} / ${achievement.date || "ARCHIVE"}`;
+    const title = document.createElement("h3");
+    title.textContent = achievement.title;
+    const description = document.createElement("p");
+    description.textContent = achievement.description || relatedProject?.description || "成果资料待补充";
+    const relation = document.createElement("code");
+    relation.textContent = achievement.projectId ? `LINKED SYSTEM / ${achievement.projectId}` : achievement.id;
+    article.append(media, meta, title, description, relation);
+    const detailUrl = achievement.url || (relatedProject?.links || []).find((link) => link.url)?.url || "";
+    if (detailUrl) {
+      const link = document.createElement("a");
+      link.href = detailUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "查看成果 ↗";
+      article.appendChild(link);
+    }
+    achievementList.appendChild(article);
+  });
+  if (!achievements.length) achievementList.textContent = "ACHIEVEMENT ARCHIVE PENDING / 成果资料整理中";
+
   function setVideoControl(button, isPlaying) {
     button.querySelector("span").textContent = isPlaying ? "Ⅱ" : "▶";
     button.setAttribute("aria-label", isPlaying ? "暂停项目视频" : "播放项目视频");

@@ -7,7 +7,7 @@
   <meta name="description" content="连接软件、硬件与真实世界的科技创新社团。">
   <title>科技创新社 | Tech Synergy Lab</title>
   <link rel="icon" href="assets/favicon.svg?v=9" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/css/home.css?v=9">
+  <link rel="stylesheet" href="assets/css/home.css?v=11">
 </head>
 <body>
   <div class="boot-screen">
@@ -38,14 +38,16 @@
     <a class="header-cta" href="/portal.html"><i></i> ENTER WORKSPACE</a>
     <button class="menu-toggle" aria-label="打开菜单" aria-expanded="false"><span></span><span></span></button>
   </header>
+  <a class="bug-feedback-fab" href="/bug-report.html">BUG FEEDBACK / 问题反馈</a>
 
   <aside class="page-rail mono" aria-label="页面导航">
     <a href="#home" class="is-active"><span>01</span><i></i></a>
     <a href="#projects"><span>02</span><i></i></a>
-    <a href="#capabilities"><span>03</span><i></i></a>
-    <a href="#about"><span>04</span><i></i></a>
-    <a href="#process"><span>05</span><i></i></a>
-    <a href="#contact"><span>06</span><i></i></a>
+    <a href="#achievements"><span>03</span><i></i></a>
+    <a href="#capabilities"><span>04</span><i></i></a>
+    <a href="#about"><span>05</span><i></i></a>
+    <a href="#process"><span>06</span><i></i></a>
+    <a href="#contact"><span>07</span><i></i></a>
   </aside>
 
   <main>
@@ -107,7 +109,15 @@
       <div class="project-empty mono" id="projectEmpty" hidden>NO MATCHING SYSTEM / 没有匹配的项目</div>
     </section>
 
-    <section class="capabilities grid-section" id="capabilities" data-scene="2">
+    <section class="achievements" id="achievements" data-scene="2">
+      <div class="section-heading reveal">
+        <div><span class="section-index mono">[ 02 / ACHIEVEMENT ARCHIVE ]</span><h2>成果展示</h2></div>
+        <p>从比赛获奖到真实可运行作品，这里记录项目从实验走向成果的关键节点。</p>
+      </div>
+      <div class="achievement-track reveal" id="achievementList" aria-live="polite"></div>
+    </section>
+
+    <section class="capabilities grid-section" id="capabilities" data-scene="3">
       <div class="section-heading reveal">
         <div>
           <span class="section-index mono">[ 02 / CAPABILITY MATRIX ]</span>
@@ -137,7 +147,7 @@
       </div>
     </section>
 
-    <section class="manifesto grid-section" id="about" data-scene="3">
+    <section class="manifesto grid-section" id="about" data-scene="4">
       <div class="section-index mono reveal">[ 00 / MANIFESTO ]</div>
       <div class="manifesto__text reveal">
         <p>软件是机器的<span>意志</span>，硬件是机器的<span>身体</span>。</p>
@@ -146,7 +156,7 @@
       <div class="manifesto__note mono reveal">// BUILD BEYOND<br>// THE SCREEN</div>
     </section>
 
-    <section class="process" id="process" data-scene="4">
+    <section class="process" id="process" data-scene="5">
       <div class="section-heading reveal">
         <div><span class="section-index mono">[ 03 / EXECUTION LOGIC ]</span><h2>如何把想法变成作品</h2></div>
       </div>
@@ -158,7 +168,7 @@
       </ol>
     </section>
 
-    <section class="contact" id="contact" data-scene="5">
+    <section class="contact" id="contact" data-scene="6">
       <div class="contact__scan" aria-hidden="true"></div>
       <div class="contact__meta mono reveal">[ CHANNEL: OPEN ]<br>NEW MEMBERS / COLLABORATION</div>
       <h2 class="reveal">下一台机器，<br>由你<span>启动。</span></h2>
@@ -174,6 +184,7 @@
   <nav class="mobile-dock mono" aria-label="移动端导航">
     <a href="#home" class="is-active"><i></i><span>首页</span></a>
     <a href="#projects"><i></i><span>项目</span></a>
+    <a href="#achievements"><i></i><span>成果</span></a>
     <a href="#capabilities"><i></i><span>能力</span></a>
     <a href="#about"><i></i><span>关于</span></a>
   </nav>
@@ -186,7 +197,7 @@
       <span><strong>TECH SYNERGY</strong><small>科技创新社</small></span>
     </a>
     <p>让技术不只存在于屏幕之内。</p>
-    <div class="footer__links mono"><a href="#projects">PROJECTS</a><a href="#capabilities">CAPABILITIES</a><a href="#contact">CONTACT</a></div>
+    <div class="footer__links mono"><a href="#projects">PROJECTS</a><a href="#capabilities">CAPABILITIES</a><a href="#contact">CONTACT</a><a href="/bug-report.html">BUG FEEDBACK</a></div>
     <div class="footer__copy mono">© <span id="year"></span> TECH SYNERGY LAB<br>DESIGNED FOR THE PHYSICAL WORLD</div>
   </footer>
 
@@ -211,6 +222,6 @@
   </template>
 
   <script src="assets/js/site-data.js?v=9"></script>
-  <script src="assets/js/app.js?v=9"></script>
+  <script src="assets/js/app.js?v=10"></script>
 </body>
 </html>

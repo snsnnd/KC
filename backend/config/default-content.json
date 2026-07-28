@@ -51,6 +51,28 @@
       ]
     }
   ],
+  "achievements": [
+    {
+      "id": "ACH_001",
+      "title": "从原型到真实运行",
+      "type": "项目成果",
+      "description": "完成视觉循迹机器人的软硬件联调、动态赛道测试与可复现实验记录。",
+      "date": "2026",
+      "projectId": "SYS_001",
+      "image": "",
+      "url": ""
+    },
+    {
+      "id": "ACH_002",
+      "title": "多模态交互终端",
+      "type": "技术作品",
+      "description": "将语音、视觉、语言模型和本地执行机构集成为可运行的桌面智能终端。",
+      "date": "2026",
+      "projectId": "SYS_002",
+      "image": "",
+      "url": ""
+    }
+  ],
   "departments": [
     { "id": "software", "name": "软件与算法部", "accountPrefix": "S", "description": "Web、嵌入式、计算机视觉与人工智能。", "isOpen": true },
     { "id": "hardware", "name": "硬件与机械部", "accountPrefix": "H", "description": "电路、PCB、结构设计、制造与运动控制。", "isOpen": true },
