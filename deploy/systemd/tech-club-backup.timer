@@ -1,11 +1,22 @@
 [Unit]
+# ================================================================
+# 科创社 CMS — 备份定时器（systemd timer）
+# 功能：每天定时触发 tech-club-backup.service 执行备份。
+# 启用方式: systemctl enable --now tech-club-backup.timer
+# 部署路径: /etc/systemd/system/tech-club-backup.timer
+# ================================================================
 Description=Daily Tech Club CMS backup
 
 [Timer]
+# 每天执行一次（固定时间点，calendar 格式）
 OnCalendar=daily
+# 如果上次触发时间错过了（如系统关机），启动后立即补执行
 Persistent=true
+# 随机延迟最多 1 小时，避免多个定时任务同时启动造成 IO 竞争
 RandomizedDelaySec=1h
+# 关联的服务单元
 Unit=tech-club-backup.service
 
 [Install]
+# 作为 timers.target 的依赖单元（timers.target 在系统启动时被加载）
 WantedBy=timers.target

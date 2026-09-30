@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="assets/css/admin.css?v=17">
 </head>
 <body>
+  <a class="admin-skip-link" href="#adminMain">跳到管理内容</a>
   <main class="login-shell" id="loginView">
     <form class="login-panel" id="loginForm">
       <div class="system-mark"><i></i><span>TSL / CONTROL PLANE</span></div>
@@ -46,7 +47,7 @@
       <button data-workspace="assets" data-panel="funds" type="button"><span>13</span>资金账户</button>
       <button data-workspace="assets" data-panel="usage" type="button"><span>14</span>使用审批 <i id="usageBadge">0</i></button>
     </aside>
-    <main class="admin-content">
+    <main class="admin-content" id="adminMain">
       <section class="admin-panel is-active" data-panel-view="workspace">
         <div class="workspace-hero"><div><p>// CONTROL PLANE DIRECTORY</p><h1>选择子后台</h1></div><span>仅显示主管理员分配的管理模块和负责部门</span></div>
         <div class="workspace-grid">
@@ -149,14 +150,20 @@
       </section>
       <section class="admin-panel" data-panel-view="uploads">
         <div class="panel-heading"><div><p>// MEDIA INGEST</p><h1>媒体上传</h1></div><button id="refreshUploads" type="button">刷新文件列表</button></div>
+        <div class="upload-guidelines">
+          <div><span>项目海报</span><strong>WebP / AVIF</strong><p>建议 1600×1000 或更高，横向 16:10；单张尽量小于 2MB。</p></div>
+          <div><span>演示视频</span><strong>MP4 / WebM</strong><p>建议 1080p、30–90 秒、无黑边；单文件最大 100MB。</p></div>
+          <div><span>文件命名</span><strong>项目编号-用途-版本</strong><p>例如 SYS_004-poster-v1.webp、SYS_004-demo-v2.mp4。</p></div>
+        </div>
         <div class="upload-panel">
-          <p>支持 JPG、PNG、WebP、AVIF、MP4、WebM，单文件最大 100MB。上传后将返回可填入项目 Poster 或 Video 字段的站内地址。</p>
-          <input id="mediaFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm">
-          <button id="uploadButton" type="button">UPLOAD MEDIA</button>
-          <div class="upload-result"><input id="uploadUrl" readonly placeholder="/uploads/..."><button id="copyUploadUrl" type="button">复制</button></div>
+          <p>一次可选择最多 20 个文件。系统会先检查类型、大小、图片尺寸和命名，再按顺序上传，避免大批文件同时占满网络。</p>
+          <input id="mediaFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm">
+          <button id="uploadButton" type="button">检查并批量上传</button>
+          <div class="upload-queue" id="uploadQueue" aria-live="polite"></div>
+          <div class="upload-result"><input id="uploadUrl" readonly placeholder="最近一次上传地址 /uploads/..."><button id="copyUploadUrl" type="button">复制</button></div>
           <p class="form-message" id="uploadMessage" role="status"></p>
         </div>
-        <div class="section-title-admin"><p>// SERVER MEDIA REGISTRY</p><h2>已上传文件</h2></div>
+        <div class="section-title-admin"><p>// SERVER MEDIA REGISTRY / RECENT 200</p><h2>最近上传</h2></div>
         <div class="upload-library" id="uploadLibrary"></div>
       </section>
       <section class="admin-panel" data-panel-view="members">

@@ -7,7 +7,7 @@
   <meta name="description" content="连接软件、硬件与真实世界的科技创新社团。">
   <title>科技创新社 | Tech Synergy Lab</title>
   <link rel="icon" href="assets/favicon.svg?v=9" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/css/home.css?v=11">
+  <link rel="stylesheet" href="assets/css/home.css?v=12">
 </head>
 <body>
   <div class="boot-screen">
@@ -93,7 +93,7 @@
           <span class="section-index mono">[ 01 / SELECTED SYSTEMS ]</span>
           <h2>已部署项目</h2>
         </div>
-        <p>不是概念图。每个项目都经过设计、制造、编程与真实场景测试。</p>
+        <p>统一使用真实项目图片或成果证书，空白项目不进入展示。</p>
         <div class="project-controls mono">
           <button id="projectPrev" type="button" aria-label="上一个项目">←</button>
           <span id="projectCount">01 / 03</span>
@@ -112,7 +112,7 @@
     <section class="achievements" id="achievements" data-scene="2">
       <div class="section-heading reveal">
         <div><span class="section-index mono">[ 02 / ACHIEVEMENT ARCHIVE ]</span><h2>成果展示</h2></div>
-        <p>从比赛获奖到真实可运行作品，这里记录项目从实验走向成果的关键节点。</p>
+        <p>机器人、电子设计、物联网、蓝桥杯与计算机设计大赛成果按年份完整展示。</p>
       </div>
       <div class="achievement-track reveal" id="achievementList" aria-live="polite"></div>
     </section>
@@ -131,18 +131,21 @@
           <div class="capability__icon icon-code" aria-hidden="true"><i></i><i></i><i></i></div>
           <h3>软件系统</h3>
           <p>Web / App / 嵌入式开发<br>计算机视觉 / AI 模型<br>数据服务 / 自动化工具</p>
+          <div class="capability__stack mono"><span>VUE</span><span>SPRING BOOT</span><span>YOLO11</span><span>PYTORCH</span><span>MYSQL</span><span>RAG</span></div>
         </article>
         <article class="capability reveal">
           <div class="capability__top mono"><span>BODY / 02</span><span class="status-dot status-dot--orange"></span></div>
           <div class="capability__icon icon-board" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           <h3>硬件工程</h3>
           <p>电路设计 / PCB 制作<br>结构建模 / 3D 打印<br>传感器 / 运动控制</p>
+          <div class="capability__stack mono"><span>STM32</span><span>ESP32</span><span>ESP8266</span><span>ORANGE PI</span><span>CAMERA</span><span>SENSORS</span></div>
         </article>
         <article class="capability reveal">
           <div class="capability__top mono"><span>LINK / 03</span><span class="status-dot status-dot--white"></span></div>
           <div class="capability__icon icon-network" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
           <h3>软硬协同</h3>
           <p>机器人 / 智能车<br>IoT / 边缘计算<br>数字孪生 / 人机交互</p>
+          <div class="capability__stack mono"><span>MQTT</span><span>RABBITMQ</span><span>ROBOT</span><span>GIMBAL</span><span>CLOUD</span><span>TESTING</span></div>
         </article>
       </div>
     </section>
@@ -159,12 +162,13 @@
     <section class="process" id="process" data-scene="5">
       <div class="section-heading reveal">
         <div><span class="section-index mono">[ 03 / EXECUTION LOGIC ]</span><h2>如何把想法变成作品</h2></div>
+        <p>四个步骤推进时，网页底层的机械臂会逐段完成装配。</p>
       </div>
       <ol class="process-list">
-        <li class="reveal"><span class="mono">01</span><strong>发现问题</strong><p>从真实需求出发，不制造伪命题。</p><i>OBSERVE</i></li>
-        <li class="reveal"><span class="mono">02</span><strong>快速原型</strong><p>用最短路径验证核心假设。</p><i>PROTOTYPE</i></li>
-        <li class="reveal"><span class="mono">03</span><strong>系统集成</strong><p>让机械、电子与软件精准协作。</p><i>INTEGRATE</i></li>
-        <li class="reveal"><span class="mono">04</span><strong>开放共享</strong><p>记录过程，让知识继续生长。</p><i>OPEN SOURCE</i></li>
+        <li class="reveal" data-arm-stage="1" tabindex="0"><span class="mono">01</span><strong>发现问题</strong><p>从真实需求出发，先确定作品的底座与边界。</p><i>OBSERVE</i></li>
+        <li class="reveal" data-arm-stage="2" tabindex="0"><span class="mono">02</span><strong>快速原型</strong><p>连接控制器、传感器与第一段执行机构。</p><i>PROTOTYPE</i></li>
+        <li class="reveal" data-arm-stage="3" tabindex="0"><span class="mono">03</span><strong>系统集成</strong><p>补齐机械、电子、通信和软件，让各部分协作。</p><i>INTEGRATE</i></li>
+        <li class="reveal" data-arm-stage="4" tabindex="0"><span class="mono">04</span><strong>测试记录</strong><p>安装执行端，在真实环境中运行并记录改进。</p><i>VERIFY</i></li>
       </ol>
     </section>
 
@@ -207,11 +211,9 @@
         <span class="hud-corner hud-corner--tl"></span><span class="hud-corner hud-corner--tr"></span>
         <span class="hud-corner hud-corner--bl"></span><span class="hud-corner hud-corner--br"></span>
         <div class="project-card__placeholder" aria-hidden="true"><span></span><i></i><i></i><i></i><b></b></div>
-        <video muted loop playsinline preload="none"></video>
         <div class="media-scan" aria-hidden="true"></div>
         <div class="media-crosshair" aria-hidden="true"><i></i></div>
         <div class="media-hud mono"><span class="media-id"></span><span class="media-category"></span><span class="media-state"><i></i> SYSTEM RENDER</span></div>
-        <button class="play-control" type="button" aria-label="播放项目视频"><span>▶</span></button>
       </div>
       <div class="project-card__body">
         <div class="project-card__number mono"></div>
@@ -221,7 +223,7 @@
     </article>
   </template>
 
-  <script src="assets/js/site-data.js?v=9"></script>
-  <script src="assets/js/app.js?v=10"></script>
+  <script src="assets/js/site-data.js?v=10"></script>
+  <script src="assets/js/app.js?v=11"></script>
 </body>
 </html>

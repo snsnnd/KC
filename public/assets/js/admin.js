@@ -200,7 +200,15 @@
     input.dataset.field = key;
     if (options.type) input.type = options.type;
     if (options.placeholder) input.placeholder = options.placeholder;
+    if (options.maxLength) input.maxLength = options.maxLength;
+    if (options.pattern) input.pattern = options.pattern;
+    if (options.required) input.required = true;
     label.appendChild(input);
+    if (options.help) {
+      const help = document.createElement("small");
+      help.textContent = options.help;
+      label.appendChild(help);
+    }
     return label;
   }
 
@@ -248,12 +256,13 @@
       const grid = document.createElement("div");
       grid.className = "editor-grid";
       grid.append(
-        field("系统编号", project.id, "id"), field("项目名称", project.title, "title"),
-        field("项目分类", project.category || "未分类", "category"),
+        field("系统编号", project.id, "id", { maxLength: 40, required: true, help: "唯一且上线后保持稳定，建议 SYS_001 格式。" }),
+        field("项目名称", project.title, "title", { maxLength: 100, required: true, help: "使用作品真实名称，不写宣传口号。" }),
+        field("项目分类", project.category || "未分类", "category", { maxLength: 40, help: "使用稳定分类，例如机器人、人工智能、物联网。" }),
         field("主题色", project.color, "color", { type: "color" }), field("标签（英文逗号分隔）", project.tags.join(", "), "tags"),
-        field("项目简介", project.description, "description", { wide: true, multiline: true }),
-        field("视频地址", project.video, "video", { placeholder: "/uploads/demo.mp4" }),
-        field("海报地址", project.poster, "poster", { placeholder: "/uploads/poster.webp" })
+        field("项目简介", project.description, "description", { wide: true, multiline: true, maxLength: 800, help: "说明解决的问题、核心方案和真实结果，建议 40–160 字。" }),
+        field("视频地址", project.video, "video", { placeholder: "/uploads/SYS_001-demo-v1.mp4", help: "建议 1080p、30–90 秒、MP4 或 WebM。" }),
+        field("海报地址", project.poster, "poster", { placeholder: "/uploads/SYS_001-poster-v1.webp", help: "建议 1600×1000、WebP 或 AVIF，并与视频首帧一致。" })
       );
       const links = document.createElement("div");
       links.className = "link-editor";
@@ -1410,6 +1419,63 @@
     return `${(size / 1024 / 1024).toFixed(1)} MB`;
   }
 
+  const projectMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif", "video/mp4", "video/webm"]);
+
+  function readMediaMetadata(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const media = file.type.startsWith("image/") ? new Image() : document.createElement("video");
+      const finish = (metadata = {}) => {
+        URL.revokeObjectURL(url);
+        resolve(metadata);
+      };
+      media.addEventListener(file.type.startsWith("image/") ? "load" : "loadedmetadata", () => finish({
+        width: media.naturalWidth || media.videoWidth || 0,
+        height: media.naturalHeight || media.videoHeight || 0,
+        duration: Number(media.duration) || 0
+      }), { once: true });
+      media.addEventListener("error", () => finish(), { once: true });
+      media.src = url;
+    });
+  }
+
+  async function inspectProjectMedia(file) {
+    const errors = [];
+    const warnings = [];
+    if (!projectMediaTypes.has(file.type)) errors.push("不支持此文件类型");
+    if (file.size > 100 * 1024 * 1024) errors.push("超过 100MB 上限");
+    if (!/^[A-Za-z0-9_-]+-(?:poster|demo|process)-v\d+\.(?:jpe?g|png|webp|avif|mp4|webm)$/i.test(file.name)) warnings.push("建议按“项目编号-用途-版本”命名");
+    const metadata = errors.length ? {} : await readMediaMetadata(file);
+    if (file.type.startsWith("image/")) {
+      if (!metadata.width || !metadata.height) errors.push("无法读取图片尺寸");
+      else {
+        if (metadata.width < 1200) warnings.push("图片宽度低于 1200px");
+        const ratio = metadata.width / metadata.height;
+        if (ratio < 1.4 || ratio > 1.9) warnings.push("海报建议使用 16:10 或 16:9 横图");
+      }
+      if (file.type === "image/jpeg" || file.type === "image/png") warnings.push("建议转为 WebP 或 AVIF 以减小体积");
+    } else if (file.type.startsWith("video/")) {
+      if (!metadata.width || !metadata.height) errors.push("无法读取视频信息");
+      else if (metadata.width < 1280 || metadata.height < 720) warnings.push("视频分辨率低于 720p");
+      if (metadata.duration > 90) warnings.push("视频超过 90 秒，建议剪辑展示版");
+    }
+    return { file, errors, warnings, metadata };
+  }
+
+  function renderUploadQueueItem(result, status = "ready", detail = "") {
+    const row = document.createElement("div");
+    row.className = `upload-queue__item${status === "uploading" ? " is-uploading" : status === "complete" ? " is-complete" : status === "error" ? " is-error" : ""}`;
+    const title = document.createElement("strong");
+    title.textContent = result.file.name;
+    const stateLabel = document.createElement("span");
+    stateLabel.textContent = status === "uploading" ? "上传中" : status === "complete" ? "已完成" : status === "error" ? "需修正" : "等待上传";
+    const description = document.createElement("p");
+    const dimensions = result.metadata?.width ? ` / ${result.metadata.width}×${result.metadata.height}${result.metadata.duration ? ` / ${Math.round(result.metadata.duration)} 秒` : ""}` : "";
+    description.textContent = detail || `${formatFileSize(result.file.size)}${dimensions}${result.warnings.length ? ` / 提示：${result.warnings.join("；")}` : ""}`;
+    row.append(title, stateLabel, description);
+    return row;
+  }
+
   function renderUploads() {
     const library = document.querySelector("#uploadLibrary");
     library.replaceChildren();
@@ -1988,7 +2054,7 @@
       optionalLoad("resourceSecrets", canAccessPanel("resources") && ["owner", "editor"].includes(state.user.role), () => api("/api/admin/resource-secrets", { method: "POST", body: "{}" }), {}),
       optionalLoad("notifications", canAccessPanel("notifications"), () => api("/api/admin/notifications?limit=100"), []),
       optionalLoad("memberMessages", canAccessPanel("notifications"), () => api("/api/admin/member-messages?limit=200"), []),
-      optionalLoad("uploads", canAccessPanel("uploads"), () => api("/api/admin/uploads"), []),
+      optionalLoad("uploads", canAccessPanel("uploads"), () => api("/api/admin/uploads?limit=200"), []),
       optionalLoad("inventory", canAccessPanel("inventory"), () => api("/api/admin/inventory"), { items: [], ledger: [] }),
       optionalLoad("funds", canAccessPanel("funds"), () => api("/api/admin/funds"), { accounts: [], ledger: [] }),
       optionalLoad("usageRequests", canAccessPanel("usage"), () => api("/api/admin/usage-requests"), []),
@@ -2326,29 +2392,63 @@
     finally { button.disabled = false; }
   });
 
-  document.querySelector("#uploadButton").addEventListener("click", async () => {
-    const file = document.querySelector("#mediaFile").files[0];
+  document.querySelector("#uploadButton").addEventListener("click", async (event) => {
+    const files = [...document.querySelector("#mediaFiles").files];
     const message = document.querySelector("#uploadMessage");
-    if (!file) { message.textContent = "请选择文件"; return; }
-    const body = new FormData();
-    body.append("file", file);
-    message.textContent = "UPLOADING...";
+    const queue = document.querySelector("#uploadQueue");
+    if (!files.length) { message.textContent = "请选择至少一个文件"; return; }
+    if (files.length > 20) { message.textContent = "单次最多选择 20 个文件"; return; }
+    const button = event.currentTarget;
+    button.disabled = true;
+    queue.replaceChildren();
+    message.textContent = `正在检查 ${files.length} 个文件...`;
     try {
-      const payload = await api("/api/admin/upload", { method: "POST", body });
-      document.querySelector("#uploadUrl").value = payload.url;
-      if (payload.file) state.uploads.unshift(payload.file);
+      const inspected = await Promise.all(files.map(inspectProjectMedia));
+      inspected.forEach((result) => queue.appendChild(renderUploadQueueItem(result, result.errors.length ? "error" : "ready", result.errors.length ? result.errors.join("；") : "")));
+      const invalid = inspected.filter((result) => result.errors.length);
+      if (invalid.length) {
+        message.textContent = `检查未通过：请先修正 ${invalid.length} 个文件，本次尚未上传任何内容。`;
+        return;
+      }
+      let completed = 0;
+      for (const [index, result] of inspected.entries()) {
+        queue.replaceChild(renderUploadQueueItem(result, "uploading", `${formatFileSize(result.file.size)} / ${index + 1} of ${inspected.length}`), queue.children[index]);
+        const body = new FormData();
+        body.append("file", result.file);
+        try {
+          const payload = await api("/api/admin/upload", { method: "POST", body });
+          document.querySelector("#uploadUrl").value = payload.url;
+          if (payload.file) state.uploads.unshift(payload.file);
+          completed += 1;
+          queue.replaceChild(renderUploadQueueItem(result, "complete", payload.url), queue.children[index]);
+        } catch (error) {
+          queue.replaceChild(renderUploadQueueItem(result, "error", error.message), queue.children[index]);
+        }
+      }
       renderUploads();
-      message.textContent = "UPLOAD COMPLETE";
+      document.querySelector("#mediaFiles").value = "";
+      message.textContent = `批量上传完成：成功 ${completed} 个，失败 ${inspected.length - completed} 个。`;
     } catch (error) {
       message.textContent = error.message;
+    } finally {
+      button.disabled = false;
     }
   });
-  document.querySelector("#copyUploadUrl").addEventListener("click", () => navigator.clipboard.writeText(document.querySelector("#uploadUrl").value));
+  document.querySelector("#copyUploadUrl").addEventListener("click", async () => {
+    const value = document.querySelector("#uploadUrl").value;
+    if (!value) { document.querySelector("#uploadMessage").textContent = "暂无可复制的上传地址"; return; }
+    try {
+      await navigator.clipboard.writeText(value);
+      document.querySelector("#uploadMessage").textContent = "已复制最近一次上传地址";
+    } catch {
+      document.querySelector("#uploadMessage").textContent = "浏览器未允许复制，请手动选择地址";
+    }
+  });
   document.querySelector("#refreshUploads").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
-      state.uploads = await api("/api/admin/uploads");
+      state.uploads = await api("/api/admin/uploads?limit=200");
       renderUploads();
       setStatus("UPLOAD LIBRARY REFRESHED");
     } catch (error) { setStatus(error.message, true); }

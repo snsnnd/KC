@@ -80,6 +80,9 @@ export async function initDesktopExperience() {
   lens.position.set(0, 2.88, 0.45);
   lens.rotation.x = Math.PI / 2;
   elbowPivot.add(lens);
+  const armAssemblyParts = [base, turret, shoulder, lowerArm, elbow, upperArm, wrist, sensor, lens];
+  let targetAssemblyProgress = 1;
+  let assemblyProgress = 1;
 
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(3.35, 0.008, 4, 128),
@@ -164,6 +167,31 @@ export async function initDesktopExperience() {
     { x: 0, y: -0.65, scale: 1.08, rx: -0.08, ry: 3.3 }
   ];
 
+  function setAssemblyStage(stage) {
+    targetAssemblyProgress = Math.max(0, Math.min(Number(stage) || 0, 4)) / 4;
+  }
+
+  const processSteps = [...document.querySelectorAll("[data-arm-stage]")];
+  const processSection = document.querySelector("#process");
+  const processBindings = processSteps.map((step) => {
+    const activate = () => {
+      processSteps.forEach((item) => item.classList.toggle("is-arm-active", item === step));
+      setAssemblyStage(step.dataset.armStage);
+    };
+    step.addEventListener("pointerenter", activate);
+    step.addEventListener("focus", activate);
+    step.addEventListener("click", activate);
+    return { step, activate };
+  });
+  const processObserver = new IntersectionObserver(([entry]) => {
+    if (entry.isIntersecting) processBindings[0]?.activate();
+    else {
+      processSteps.forEach((step) => step.classList.remove("is-arm-active"));
+      setAssemblyStage(4);
+    }
+  }, { threshold: 0.55 });
+  if (processSection) processObserver.observe(processSection);
+
   let frame = 0;
   let running = true;
   let currentSection = 0;
@@ -225,6 +253,13 @@ export async function initDesktopExperience() {
     model.scale.lerp(targetScale, damping);
     model.rotation.x += (state.rx - model.rotation.x) * damping;
     model.rotation.y += (state.ry - model.rotation.y) * damping;
+    assemblyProgress += (targetAssemblyProgress - assemblyProgress) * 0.075;
+    const thresholds = [0, 0.08, 0.2, 0.31, 0.42, 0.54, 0.66, 0.78, 0.88];
+    armAssemblyParts.forEach((part, index) => {
+      const reveal = Math.max(0, Math.min((assemblyProgress - thresholds[index]) / 0.14, 1));
+      part.visible = reveal > 0.01;
+      part.scale.setScalar(Math.max(reveal, 0.01));
+    });
     shoulderPivot.rotation.y = Math.sin(time * 0.00032) * 0.08;
     elbowPivot.rotation.x = Math.sin(time * 0.00024) * 0.06;
     ring.rotation.z += 0.0007;
@@ -268,6 +303,13 @@ export async function initDesktopExperience() {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("resize", onResize);
     document.removeEventListener("visibilitychange", onVisibilityChange);
+    processObserver.disconnect();
+    processBindings.forEach(({ step, activate }) => {
+      step.removeEventListener("pointerenter", activate);
+      step.removeEventListener("focus", activate);
+      step.removeEventListener("click", activate);
+    });
+    processSteps.forEach((step) => step.classList.remove("is-arm-active"));
     scene.traverse((object) => {
       object.geometry?.dispose();
       if (Array.isArray(object.material)) object.material.forEach((material) => material.dispose());

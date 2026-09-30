@@ -7,8 +7,10 @@
 生产模板固定使用以下路径：
 
 - API 程序：`/opt/tech-club-cms`
-- 静态站点版本：`/var/www/tech-club/releases/<release-id>`
-- 当前静态站点：`/var/www/tech-club/current`
+- 展示端版本：`/var/www/tech-club-showcase/releases/<release-id>`
+- 当前展示端：`/var/www/tech-club-showcase/current`
+- 管理端版本：`/var/www/tech-club-control/releases/<release-id>`
+- 当前管理端：`/var/www/tech-club-control/current`
 - ACME 验证目录：`/var/www/tech-club-acme`
 - 数据目录：`/var/lib/tech-club`
 - 上传目录：`/var/lib/tech-club/uploads`
@@ -106,14 +108,15 @@ curl --fail --silent "https://$DOMAIN/api/health"
 
 ## 独立发布前端
 
-前端与 API 使用同一公网 Origin，但发布产物完全独立。前端仍通过根相对路径访问 `/api/` 和 `/uploads/`，因此不需要 CORS，也不能把静态页面直接迁到另一个域名。
+展示端、管理端与 API 使用同一公网 Origin，但两套静态发布物拥有独立版本目录和 `current` 链接。前端仍通过根相对路径访问 `/api/` 和 `/uploads/`，因此不需要 CORS；Node API 和数据目录不按前端拆分。
 
 ```bash
 install -o root -g root -m 0755 deploy/scripts/deploy-frontend.sh /usr/local/sbin/deploy-tech-club-frontend
-DOMAIN=www.jtkczx.xyz /usr/local/sbin/deploy-tech-club-frontend /path/to/public 20260724T120000Z
+DOMAIN=www.jtkczx.xyz /usr/local/sbin/deploy-tech-club-frontend /path/to/public showcase 20260724T120000Z
+DOMAIN=www.jtkczx.xyz /usr/local/sbin/deploy-tech-club-frontend /path/to/public control 20260724T120000Z
 ```
 
-脚本将文件复制到新版本目录，校验必要入口，原子切换 `/var/www/tech-club/current`，并检查首页和 `/api/health`。普通前端发布不执行 `systemctl restart tech-club-cms`。后端邮件依赖 `/activate.html`、`/email-approval.html`、`/member.html` 和 `/admin.html` 等稳定路径，前端升级不得直接删除这些入口。
+脚本按发布面复制文件并校验必要入口，分别原子切换 `/var/www/tech-club-showcase/current` 或 `/var/www/tech-club-control/current`，然后检查对应页面和 `/api/health`。首次切换 Nginx 配置前必须先准备两套 `current`；迁移窗口先发布两套静态文件，再执行 `nginx -t`、reload，并分别检查 `/` 和 `/admin.html`。普通前端发布不执行 `systemctl restart tech-club-cms`，也不读取或改写数据目录。后端邮件依赖 `/activate.html`、`/email-approval.html`、`/member.html` 和 `/admin.html` 等稳定路径，前端升级不得删除这些入口。
 
 root 查看加密数据使用：
 

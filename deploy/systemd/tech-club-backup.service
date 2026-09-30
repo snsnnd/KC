@@ -1,31 +1,65 @@
 [Unit]
+# ================================================================
+# 科创社 CMS — 备份服务（systemd oneshot）
+# 功能：执行数据备份脚本，打包 CMS 数据和环境文件。
+# 被 tech-club-backup.timer 定时触发。
+# 部署路径: /etc/systemd/system/tech-club-backup.service
+# ================================================================
 Description=Back up Tech Club CMS data and secrets
 After=local-fs.target
 
 [Service]
+# Oneshot 类型：执行一次即退出（非常驻进程）
 Type=oneshot
 User=root
 Group=root
+# 安全注意：UMask 0077 确保创建的文件仅 root 可读写
 UMask=0077
+# 运行时目录 /run/tech-club-backup（自动创建和清理）
 RuntimeDirectory=tech-club-backup
 RuntimeDirectoryMode=0700
+# 执行备份脚本（绝对路径）
 ExecStart=/usr/local/sbin/backup-tech-club.sh
+# 备份超时：最多 15 分钟（包含服务停止、打包、重启、压缩等全部步骤）
 TimeoutStartSec=15min
+
+# ================ 安全沙箱配置 ================
+# 以下配置确保备份进程在严格的沙箱环境中运行，
+# 即使备份脚本被利用也无法造成更大损害。
+
+# 禁止进程获取新的特权
 NoNewPrivileges=true
+# 使用私有的 /tmp 和 /var/tmp 空间
 PrivateTmp=true
+# 禁止访问物理设备
 PrivateDevices=true
+# 严格保护系统目录（只读，只允许写入 ReadWritePaths 中指定的路径）
 ProtectSystem=strict
+# 禁止访问 /home、/root 和 /run/user
 ProtectHome=true
+# 禁止修改主机名
 ProtectHostname=true
+# 禁止修改系统时间
 ProtectClock=true
+# 禁止修改内核参数
 ProtectKernelTunables=true
+# 禁止加载/卸载内核模块
 ProtectKernelModules=true
+# 禁止访问内核日志
 ProtectKernelLogs=true
+# 禁止修改 cgroups（资源控制组）
 ProtectControlGroups=true
+# 禁止创建命名空间
 RestrictNamespaces=true
+# 禁止实时调度
 RestrictRealtime=true
+# 禁止设置 SUID/SGID 位
 RestrictSUIDSGID=true
+# 锁定进程 personality（防止执行域切换）
 LockPersonality=true
+# 只允许执行本机架构的系统调用
 SystemCallArchitectures=native
+# 只允许 AF_UNIX 地址族（本地 socket 通信）
 RestrictAddressFamilies=AF_UNIX
+# 允许写入的路径：备份目录和运行时锁目录
 ReadWritePaths=/var/backups/tech-club /run/tech-club-backup

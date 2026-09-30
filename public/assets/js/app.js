@@ -45,13 +45,11 @@
   }
   const projectList = document.querySelector("#projectList");
   const template = document.querySelector("#projectTemplate");
-  const videos = [];
   const projects = Array.isArray(data.projects) ? data.projects : [];
 
   projects.forEach((project, index) => {
     const fragment = template.content.cloneNode(true);
     const card = fragment.querySelector(".project-card");
-    const video = fragment.querySelector("video");
     const category = project.category || project.tags?.[0] || "未分类";
     card.style.setProperty("--project-color", project.color || "#b8ff3d");
     card.dataset.category = category;
@@ -70,16 +68,16 @@
       tags.appendChild(item);
     });
 
-    if (project.video) {
-      card.classList.add("has-video");
-      video.dataset.src = project.video;
-      if (project.poster) {
-        video.poster = project.poster;
-        card.classList.add("has-poster");
-      }
-      video.addEventListener("loadeddata", () => card.classList.add("is-video-ready"), { once: true });
-      fragment.querySelector(".media-state").lastChild.textContent = " LIVE CAPTURE";
-      videos.push({ video, card });
+    if (project.poster) {
+      const image = new Image();
+      image.className = "project-card__image";
+      image.src = project.poster;
+      image.alt = `${project.title}项目图`;
+      fragment.querySelector(".project-card__media").prepend(image);
+      card.classList.add("has-poster");
+      image.addEventListener("load", () => card.classList.add("is-image-ready"), { once: true });
+      image.addEventListener("error", () => card.classList.remove("has-poster", "is-image-ready"), { once: true });
+      fragment.querySelector(".media-state").lastChild.textContent = " STILL IMAGE";
     }
 
     const links = fragment.querySelector(".project-card__links");
@@ -100,26 +98,6 @@
         anchor.addEventListener("click", (event) => event.preventDefault());
       }
       links.appendChild(anchor);
-    });
-
-    const playButton = fragment.querySelector(".play-control");
-    playButton.addEventListener("click", () => {
-      if (!video.src) {
-        video.src = video.dataset.src;
-        video.load();
-      }
-      if (video.paused) {
-        video.play().then(() => {
-          card.classList.remove("is-fallback");
-          setVideoControl(playButton, true);
-        }).catch(() => {
-          card.classList.add("is-fallback");
-          setVideoControl(playButton, false);
-        });
-      } else {
-        video.pause();
-        setVideoControl(playButton, false);
-      }
     });
 
     projectList.appendChild(fragment);
@@ -196,7 +174,6 @@
       const matchesCategory = activeCategory === "全部" || card.dataset.category === activeCategory;
       const matchesQuery = !query || card.dataset.search.includes(query);
       card.hidden = !matchesCategory || !matchesQuery;
-      if (card.hidden) card.querySelector("video")?.pause();
       return !card.hidden;
     });
     projectResults.textContent = `${String(visibleProjectCards.length).padStart(2, "0")} / ${String(projectCards.length).padStart(2, "0")} SYSTEMS`;
@@ -211,7 +188,7 @@
 
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const configuredAchievements = Array.isArray(data.achievements) ? data.achievements : [];
-  const achievements = configuredAchievements.length ? configuredAchievements : projects.slice(0, 8).map((project, index) => ({
+  const achievements = (configuredAchievements.length ? configuredAchievements : projects.map((project, index) => ({
     id: `PROJECT_${String(index + 1).padStart(2, "0")}`,
     title: project.title,
     type: project.category || "项目成果",
@@ -219,7 +196,7 @@
     projectId: project.id,
     image: project.poster || "",
     url: (project.links || []).find((link) => link.url)?.url || ""
-  }));
+  }))).slice().sort((left, right) => String(right.date || "").localeCompare(String(left.date || ""), "zh-CN"));
   const achievementList = document.querySelector("#achievementList");
   achievements.forEach((achievement, index) => {
     const relatedProject = projectById.get(achievement.projectId);
@@ -232,7 +209,6 @@
       const image = document.createElement("img");
       image.src = imageUrl;
       image.alt = achievement.title;
-      image.loading = "lazy";
       media.appendChild(image);
     } else {
       const marker = document.createElement("span");
@@ -261,35 +237,6 @@
     achievementList.appendChild(article);
   });
   if (!achievements.length) achievementList.textContent = "ACHIEVEMENT ARCHIVE PENDING / 成果资料整理中";
-
-  function setVideoControl(button, isPlaying) {
-    button.querySelector("span").textContent = isPlaying ? "Ⅱ" : "▶";
-    button.setAttribute("aria-label", isPlaying ? "暂停项目视频" : "播放项目视频");
-  }
-
-  const videoObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      const video = entry.target;
-      const button = video.closest(".project-card").querySelector(".play-control");
-      if (entry.isIntersecting) {
-        if (!video.src) {
-          video.src = video.dataset.src;
-          video.load();
-        }
-        video.play().then(() => {
-          video.closest(".project-card").classList.remove("is-fallback");
-          setVideoControl(button, true);
-        }).catch(() => {
-          video.closest(".project-card").classList.add("is-fallback");
-          setVideoControl(button, false);
-        });
-      } else {
-        video.pause();
-        setVideoControl(button, false);
-      }
-    });
-  }, { rootMargin: "120px 0px", threshold: 0.15 });
-  videos.forEach(({ video }) => videoObserver.observe(video));
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const bootScreen = document.querySelector(".boot-screen");
@@ -419,7 +366,7 @@
   async function syncDesktopExperience() {
     if (desktopExperience.matches && !stopDesktopExperience) {
       try {
-        const module = await import("./desktop-experience.js?v=9");
+        const module = await import("./desktop-experience.js?v=10");
         if (desktopExperience.matches) stopDesktopExperience = await module.initDesktopExperience();
       } catch (error) {
         console.warn("Desktop experience unavailable; using the CSS fallback.", error);

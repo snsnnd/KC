@@ -66,7 +66,7 @@ try {
     children: [{ id: "resource-child", title: "合集子资源", description: "继承合集权限", type: "DOWNLOAD", url: "https://example.com/child", links: [{ label: "镜像地址", url: "https://example.com/child-mirror" }], accessNote: "子资源说明", permissionKey: "", accessSecret: "child-secret", children: [] }]
   };
   const savedContent = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...adminContent.body, resources: [...adminContent.body.resources, collection] }) });
-  assert.equal(savedContent.response.status, 200);
+  assert.equal(savedContent.response.status, 200, JSON.stringify(savedContent.body));
   const concurrentContentSaves = await Promise.all([
     request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(savedContent.body.content) }),
     request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(savedContent.body.content) })
@@ -78,14 +78,23 @@ try {
   const excessiveProjectSave = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(excessiveProjects) });
   assert.equal(excessiveProjectSave.response.status, 400);
   assert.equal(excessiveProjectSave.body.error, "公开项目最多 100 个");
+  const duplicateProjects = structuredClone(latestContent.body);
+  duplicateProjects.projects = [duplicateProjects.projects[0], { ...duplicateProjects.projects[0], title: "重复编号项目" }];
+  const duplicateProjectSave = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(duplicateProjects) });
+  assert.equal(duplicateProjectSave.response.status, 400);
+  assert.match(duplicateProjectSave.body.error, /项目编号不能重复/);
   const excessiveLinks = structuredClone(latestContent.body);
   excessiveLinks.resources.find((resource) => resource.id === collection.id).links = Array.from({ length: 13 }, (_, index) => ({ label: `链接 ${index + 1}`, url: `https://example.com/link-${index + 1}` }));
   const excessiveLinkSave = await request("/api/admin/content", { method: "PUT", headers: adminHeaders, body: JSON.stringify(excessiveLinks) });
   assert.equal(excessiveLinkSave.response.status, 400);
   const publicContent = await request("/api/content");
   assert.ok(publicContent.body.achievements.length >= 1);
+  assert.equal("managerEmail" in publicContent.body.settings, false);
+  assert.equal("accountPrefix" in publicContent.body.departments[0], false);
   const publicCollection = publicContent.body.resources.find((resource) => resource.id === collection.id);
   assert.equal(publicCollection.protected, true);
+  assert.equal("permissionKey" in publicCollection, false);
+  assert.equal("accessSecret" in publicCollection, false);
   assert.equal(publicCollection.url, "");
   assert.equal(publicCollection.links[0].url, "");
   assert.equal(publicCollection.children[0].protected, true);

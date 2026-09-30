@@ -1,63 +1,96 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import express from "express";
-import multer from "multer";
-import nodemailer from "nodemailer";
-import readXlsxFile from "read-excel-file/node";
-import unzipper from "unzipper";
+// ============================================================
+// 模块导入：Node.js 内置模块 + 第三方依赖
+// ============================================================
+import crypto from "node:crypto";   // 加密模块（哈希、AES-GCM、scrypt）
+import fs from "node:fs";           // 文件系统
+import path from "node:path";       // 路径处理
+import { fileURLToPath } from "node:url"; // 将 file:// URL 转为文件路径
+import express from "express";               // Web 框架
+import multer from "multer";                 // 文件上传中间件
+import nodemailer from "nodemailer";          // 邮件发送
+import readXlsxFile from "read-excel-file/node"; // XLSX 文件读取
+import unzipper from "unzipper";              // ZIP 解压（用于解析 XLSX）
+// 默认邮件模板（用量审批、入社申请等）
 import { defaultUsageMailTemplates, defaultApplicationMailTemplates } from "../config/mail-templates.js";
 
+// ============================================================
+// 路径配置：确定数据目录、上传目录及各 JSON 数据文件路径
+// ============================================================
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendDirectory = path.resolve(__dirname, "..");
-const port = Number(process.env.PORT || 3000);
-const dataDirectory = process.env.DATA_DIR || path.join(backendDirectory, "data");
-const uploadDirectory = process.env.UPLOAD_DIR || path.join(dataDirectory, "uploads");
-const contentFile = path.join(dataDirectory, "content.json");
-const applicationFile = path.join(dataDirectory, "applications.json");
-const mailConfigFile = path.join(dataDirectory, "mail-config.enc.json");
-const adminFile = path.join(dataDirectory, "admins.json");
-const auditFile = path.join(dataDirectory, "audit.json");
-const memberFile = path.join(dataDirectory, "members.json");
-const resourceSecretFile = path.join(dataDirectory, "resource-secrets.enc.json");
-const notificationFile = path.join(dataDirectory, "notifications.json");
-const inventoryFile = path.join(dataDirectory, "inventory.json");
-const inventoryLedgerFile = path.join(dataDirectory, "inventory-ledger.json");
-const fundFile = path.join(dataDirectory, "funds.json");
-const usageRequestFile = path.join(dataDirectory, "usage-requests.json");
-const emailApprovalTokenFile = path.join(dataDirectory, "email-approval-tokens.json");
-const memberActivationCodeFile = path.join(dataDirectory, "member-activation-codes.json");
-const memberMessageFile = path.join(dataDirectory, "member-messages.json");
-const bugReportFile = path.join(dataDirectory, "bug-reports.json");
-const projectWorkspaceFile = path.join(dataDirectory, "project-workspaces.json");
-const uploadRegistryFile = path.join(dataDirectory, "uploads.json");
-const adminPassword = process.env.ADMIN_PASSWORD || "";
-const sessionSecret = process.env.SESSION_SECRET || "";
-const secureCookies = process.env.COOKIE_SECURE === "true";
-const publicBaseUrl = cleanString(process.env.PUBLIC_BASE_URL, 500).replace(/\/$/, "");
-const productionMode = process.env.NODE_ENV === "production";
-const dataEncryptionEnabled = process.env.DATA_ENCRYPTION === "true";
+const backendDirectory = path.resolve(__dirname, "..");  // backend/ 目录
+const port = Number(process.env.PORT || 3000);           // 服务器端口
+const dataDirectory = process.env.DATA_DIR || path.join(backendDirectory, "data"); // 数据存储目录
+const uploadDirectory = process.env.UPLOAD_DIR || path.join(dataDirectory, "uploads"); // 上传文件目录
+
+// --- 各数据文件路径 ---
+const contentFile = path.join(dataDirectory, "content.json");               // 社团内容（设置、项目等）
+const applicationFile = path.join(dataDirectory, "applications.json");      // 入社申请表
+const mailConfigFile = path.join(dataDirectory, "mail-config.enc.json");    // 加密的邮件配置
+const adminFile = path.join(dataDirectory, "admins.json");                  // 管理员账号
+const auditFile = path.join(dataDirectory, "audit.json");                   // 操作审计日志
+const memberFile = path.join(dataDirectory, "members.json");                // 成员账号
+const resourceSecretFile = path.join(dataDirectory, "resource-secrets.enc.json"); // 加密的资源密钥
+const notificationFile = path.join(dataDirectory, "notifications.json");     // 通知记录
+const inventoryFile = path.join(dataDirectory, "inventory.json");           // 库存物资
+const inventoryLedgerFile = path.join(dataDirectory, "inventory-ledger.json"); // 库存流水
+const fundFile = path.join(dataDirectory, "funds.json");                    // 社团资金账户
+const usageRequestFile = path.join(dataDirectory, "usage-requests.json");   // 用量申请（物资/资金）
+const emailApprovalTokenFile = path.join(dataDirectory, "email-approval-tokens.json"); // 邮件审批令牌
+const memberActivationCodeFile = path.join(dataDirectory, "member-activation-codes.json"); // 成员激活码
+const memberMessageFile = path.join(dataDirectory, "member-messages.json"); // 成员消息
+const bugReportFile = path.join(dataDirectory, "bug-reports.json");         // Bug 报告
+const projectWorkspaceFile = path.join(dataDirectory, "project-workspaces.json"); // 项目工作区
+const uploadRegistryFile = path.join(dataDirectory, "uploads.json");        // 上传文件注册表
+
+// ============================================================
+// 环境变量与全局配置
+// ============================================================
+const adminPassword = process.env.ADMIN_PASSWORD || "";          // 初始管理员密码
+const sessionSecret = process.env.SESSION_SECRET || "";          // 会话密钥（用于加密和签名）
+const secureCookies = process.env.COOKIE_SECURE === "true";      // Cookie 是否启用 Secure 属性（HTTPS 专用）
+const publicBaseUrl = cleanString(process.env.PUBLIC_BASE_URL, 500).replace(/\/$/, ""); // 公开访问的基准 URL
+const productionMode = process.env.NODE_ENV === "production";    // 是否为生产环境
+const dataEncryptionEnabled = process.env.DATA_ENCRYPTION === "true"; // 是否启用数据加密存储
+
+/** 邮件审批令牌有效期（小时），默认 24 小时，范围 1~72 */
 const emailApprovalTtlMs = Math.max(1, Math.min(Number(process.env.EMAIL_APPROVAL_TTL_HOURS) || 24, 72)) * 60 * 60 * 1000;
+/** 成员激活码有效期（小时），默认 168 小时/7 天，范围 1~720 */
 const memberActivationTtlMs = Math.max(1, Math.min(Number(process.env.MEMBER_ACTIVATION_TTL_HOURS) || 168, 720)) * 60 * 60 * 1000;
+
+// 后台管理面板的可导航分类，新增面板需同步更新此列表
 const adminPanelKeys = ["settings", "projects", "project-workspaces", "departments", "resources", "applications", "mail", "notifications", "uploads", "members", "audit", "inventory", "funds", "usage"];
+// 可分配给其他管理员的面板（"mail" 只能由 owner 管理）
 const assignableAdminPanelKeySet = new Set(adminPanelKeys.filter((panel) => panel !== "mail"));
 
+// ============================================================
+// 启动前校验：创建必要目录、检查环境变量安全性
+// ============================================================
 fs.mkdirSync(uploadDirectory, { recursive: true });
+// 安全措施：会话密钥至少 32 字符
 if (sessionSecret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
+// 生产环境强制要求：64 位 hex 密钥、HTTPS Cookie、HTTPS 地址、数据加密
 if (productionMode && !/^[0-9a-fA-F]{64}$/.test(sessionSecret)) throw new Error("Production SESSION_SECRET must be exactly 64 hexadecimal characters");
 if (productionMode && !secureCookies) throw new Error("Production COOKIE_SECURE must be true");
 if (productionMode && !/^https:\/\//i.test(publicBaseUrl)) throw new Error("Production PUBLIC_BASE_URL must use HTTPS");
 if (productionMode && !dataEncryptionEnabled) throw new Error("Production DATA_ENCRYPTION must be true");
+// 若管理员账号文件不存在，则初始密码必须至少 12 字符
 if (!fs.existsSync(adminFile) && adminPassword.length < 12) throw new Error("ADMIN_PASSWORD must be at least 12 characters when creating the first admin");
+// 若无内容配置文件，从默认配置复制
 if (!fs.existsSync(contentFile)) fs.copyFileSync(path.join(backendDirectory, "config", "default-content.json"), contentFile);
+
+// ============================================================
+// ensureJsonFile：确保 JSON 文件存在且有内容，否则用初始值填充
+// @param {string} file - 文件路径
+// @param {*} initialValue - 初始值（若启用加密则自动加密）
+// ============================================================
 function ensureJsonFile(file, initialValue) {
   if (!fs.existsSync(file) || !fs.readFileSync(file, "utf8").trim()) {
     const payload = isEncryptedFile(file) || !dataEncryptionEnabled ? initialValue : encryptPayload(initialValue);
-    fs.writeFileSync(file, `${JSON.stringify(payload)}\n`, { mode: 0o600 });
+    fs.writeFileSync(file, `${JSON.stringify(payload)}\n`, { mode: 0o600 }); // 仅所有者可读写
   }
 }
 
+// 初始化各数据文件（若不存在则创建）
 ensureJsonFile(applicationFile, []);
 ensureJsonFile(auditFile, []);
 ensureJsonFile(memberFile, []);
@@ -73,9 +106,16 @@ ensureJsonFile(bugReportFile, []);
 ensureJsonFile(projectWorkspaceFile, []);
 ensureJsonFile(uploadRegistryFile, []);
 
+// ============================================================
+// Express 应用初始化
+// ============================================================
 const app = express();
-app.disable("x-powered-by");
-app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS) || 1);
+app.disable("x-powered-by"); // 安全措施：隐藏 Express 版本信息
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS) || 1); // 信任反向代理层数
+
+// ============================================================
+// 优雅关闭中间件：服务器退出时拒绝新请求，等待已有请求完成
+// ============================================================
 let shuttingDown = false;
 let activeHttpRequests = 0;
 app.use((_request, response, next) => {
@@ -91,22 +131,34 @@ app.use((_request, response, next) => {
   response.once("close", complete);
   next();
 });
+
+// JSON 请求体解析，限制 1MB 防止超大请求
 app.use(express.json({ limit: "1mb" }));
 
-const sessions = new Map();
-const memberSessions = new Map();
-const rateBuckets = new Map();
-let writeQueue = Promise.resolve();
-let resourceOperationQueue = Promise.resolve();
-let auditEntries = readJson(auditFile).slice(0, 5000);
+// ============================================================
+// 全局数据结构：会话、限流、写入队列、审计日志
+// ============================================================
+const sessions = new Map();            // 管理员会话（token -> session）
+const memberSessions = new Map();      // 成员会话（token -> session）
+const rateBuckets = new Map();         // 速率限制桶（key -> timestamps[]）
+let writeQueue = Promise.resolve();    // 串行写入队列，防止并发写入冲突
+let resourceOperationQueue = Promise.resolve(); // 资源操作串行队列
+let auditEntries = readJson(auditFile).slice(0, 5000); // 审计日志（内存缓存，最多 5000 条）
 
+// ============================================================
+// 定期清理：每分钟清理过期的限流记录、管理员会话、成员会话
+// 使用 .unref() 使定时器不阻止进程退出
+// ============================================================
 setInterval(() => {
   const now = Date.now();
+  // 清理 1 小时前的限流记录
   for (const [key, entries] of rateBuckets) { const keep = entries.filter((time) => now - time < 60 * 60 * 1000); if (keep.length) rateBuckets.set(key, keep); else rateBuckets.delete(key); }
+  // 清理过期会话
   for (const [token, session] of sessions) { if (session.expiresAt < now) sessions.delete(token); }
   for (const [token, session] of memberSessions) { if (session.expiresAt < now) memberSessions.delete(token); }
 }, 60 * 1000).unref();
 
+/** 安全读取 JSON 文件，自动处理加密解密。.enc.json 不自动解密，普通 .json 若含加密信封则自动解密 */
 function readJson(file) {
   try {
     const raw = fs.readFileSync(file, "utf8");
@@ -121,6 +173,7 @@ function readJson(file) {
   }
 }
 
+/** 安全写入 JSON：串行队列防并发 + 临时文件 + 原子重命名，避免写入中断损坏数据。生产环境自动加密 */
 function writeJson(file, value) {
   const payload = isEncryptedFile(file) || !dataEncryptionEnabled ? value : encryptPayload(value);
   const run = writeQueue.catch(() => {}).then(async () => {
@@ -1079,9 +1132,13 @@ function memberResourceSummary(member, resource, ancestors = []) {
 function publicResourceNode(resource, ancestorProtected = false) {
   const protectedResource = ancestorProtected || Boolean(resource.permissionKey);
   return {
-    ...resource,
+    id: resource.id,
+    title: resource.title,
+    description: resource.description,
+    type: resource.type,
     url: protectedResource ? "" : resource.url,
-    links: (resource.links || []).map((link) => protectedResource ? { ...link, url: "" } : link),
+    links: (resource.links || []).map((link) => ({ label: link.label, url: protectedResource ? "" : link.url })),
+    accessNote: resource.accessNote,
     children: (resource.children || []).map((child) => publicResourceNode(child, protectedResource)),
     protected: protectedResource
   };
@@ -1121,10 +1178,14 @@ async function recordUpload(file, mime, adminUser) {
   return record;
 }
 
-async function listUploads() {
+async function listUploads(limit = 200) {
   const recordsByName = new Map(readJson(uploadRegistryFile).map((record) => [record.fileName, record]));
   const entries = await fs.promises.readdir(uploadDirectory, { withFileTypes: true });
-  const uploads = await Promise.all(entries.filter((entry) => entry.isFile() && /^(?:inventory-)?\d+-[a-f0-9]{16}\.(?:jpg|png|webp|avif|mp4|webm)$/.test(entry.name)).map(async (entry) => {
+  const recentEntries = entries
+    .filter((entry) => entry.isFile() && /^(?:inventory-)?\d+-[a-f0-9]{16}\.(?:jpg|png|webp|avif|mp4|webm)$/.test(entry.name))
+    .sort((left, right) => Number(right.name.match(/^(?:inventory-)?(\d+)-/)?.[1] || 0) - Number(left.name.match(/^(?:inventory-)?(\d+)-/)?.[1] || 0))
+    .slice(0, Math.max(1, Math.min(Number(limit) || 200, 500)));
+  const uploads = await Promise.all(recentEntries.map(async (entry) => {
     const details = await fs.promises.stat(path.join(uploadDirectory, entry.name));
     const record = recordsByName.get(entry.name);
     return {
@@ -1145,38 +1206,73 @@ function noStore(response) {
   response.set("Cache-Control", "no-store");
 }
 
+/**
+ * 获取公开内容配置（排除 _meta 私有元数据字段）
+ * 对资源节点应用 publicResourceNode 转换，移除内部管理字段
+ * @returns {Object} 公开内容对象
+ */
 function getPublicContent() {
   const content = readJson(contentFile);
-  const { _meta, ...publicContent } = content;
   return {
-    ...publicContent,
+    settings: {
+      clubName: content.settings.clubName,
+      englishName: content.settings.englishName,
+      heroTitle: content.settings.heroTitle,
+      heroDescription: content.settings.heroDescription,
+      contactEmail: content.settings.contactEmail
+    },
+    projects: content.projects,
+    achievements: content.achievements || [],
+    departments: content.departments.map((department) => ({
+      id: department.id,
+      name: department.name,
+      description: department.description,
+      isOpen: department.isOpen
+    })),
     resources: content.resources.map((resource) => publicResourceNode(resource))
   };
 }
 
+// ==================== 媒体文件上传配置 ====================
+// 支持的 MIME 类型（图片 + 视频）
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif", "video/mp4", "video/webm"]);
+// 仅图片类型的 MIME（用于库存图片上传，限制更严格）
 const allowedImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+// MIME 类型到文件扩展名的映射表
 const extensionByMime = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/avif": ".avif", "video/mp4": ".mp4", "video/webm": ".webm" };
+// 通用媒体文件存储配置：文件名 = 时间戳 + 8字节随机数 + 扩展名
 const mediaStorage = multer.diskStorage({
   destination: uploadDirectory,
   filename: (_request, file, callback) => callback(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extensionByMime[file.mimetype] || ""}`)
 });
+// 库存图片专用存储配置：文件名前缀 "inventory-" 以区分于其他上传
 const inventoryImageStorage = multer.diskStorage({
   destination: uploadDirectory,
   filename: (_request, file, callback) => callback(null, `inventory-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extensionByMime[file.mimetype] || ""}`)
 });
+// 通用上传中间件：限制 100MB、单文件、仅允许图片+视频
 const upload = multer({
   storage: mediaStorage,
   limits: { fileSize: 100 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) => callback(null, allowedMimeTypes.has(file.mimetype))
 });
+// 库存图片上传中间件：限制 2MB、单文件、仅允许图片（不含视频）
 const inventoryImageUpload = multer({
   storage: inventoryImageStorage,
   limits: { fileSize: 2 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) => callback(null, allowedImageMimeTypes.has(file.mimetype))
 });
+// 库存导入上传中间件：内存存储（不落盘），2MB 限制，用于 CSV/Excel 导入
 const inventoryImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024, files: 1 } });
 
+/**
+ * 通过读取文件头魔数检测媒体文件的真实 MIME 类型
+ * 不信任客户端提供的 Content-Type，防止 MIME 类型伪造攻击
+ * 支持的格式：JPEG(FFD8FF)、PNG(89504E47)、WEBP(RIFF...WEBP)、
+ *            AVIF/AVIS(ftyp avif/avis)、MP4(ftyp isom/mp42等)、WebM(1A45DFA3)
+ * @param {Object} file - multer 文件对象，含 file.path
+ * @returns {Promise<string>} 检测到的 MIME 类型字符串，无法识别返回空字符串
+ */
 async function detectMediaMime(file) {
   const handle = await fs.promises.open(file.path, "r");
   try {
@@ -1187,6 +1283,7 @@ async function detectMediaMime(file) {
     if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
     if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
     if (bytes.length >= 12 && bytes.subarray(4, 8).toString("ascii") === "ftyp") {
+      // ftyp box：遍历所有可能的 brand 偏移量来区分 AVIF 和 MP4
       const brands = [8, 16, 20, 24, 28].filter((offset) => bytes.length >= offset + 4).map((offset) => bytes.subarray(offset, offset + 4).toString("ascii"));
       if (brands.some((brand) => ["avif", "avis"].includes(brand))) return "image/avif";
       if (brands.some((brand) => ["isom", "iso2", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V ", "qt  "].includes(brand))) return "video/mp4";
@@ -1199,6 +1296,11 @@ async function detectMediaMime(file) {
   }
 }
 
+/**
+ * 创建邮件发送器
+ * @param {Object} config - 邮件配置，包含 email 和 authCode
+ * @returns {Object|null} nodemailer transport 实例，配置缺失时返回 null
+ */
 function createMailer(config) {
   if (!config?.email || !config?.authCode) return null;
   return nodemailer.createTransport({
@@ -1214,11 +1316,26 @@ function createMailer(config) {
   });
 }
 
+/**
+ * 构造发件人信息
+ * 优先使用 mailConfig 中的 senderName，否则取社团名称+"运营组"
+ * @param {Object} content - 公共内容配置（可选）
+ * @returns {{ name: string, address: string }}
+ */
 function mailFrom(content = readJson(contentFile)) {
   return { name: mailConfig?.senderName || `${content.settings.clubName || "科技创新社"}运营组`, address: mailConfig.email };
 }
 
+/**
+ * 邮件全局配置对象
+ * 支持自定义模板字段：
+ * - applicationRecipientAdminIds: 加入申请审批通知的指定管理员 ID 白名单
+ * - applicationAccepted/RejectedSubject/Body: 加入申请审批结果邮件模板
+ * - usageApproved/RejectedSubject/Body: 使用申请审批结果邮件模板
+ * @type {{ email: string, authCode: string, replyTo?: string, senderName?: string, applicationRecipientAdminIds?: string[], applicationAcceptedSubject?: string, applicationAcceptedBody?: string, applicationRejectedSubject?: string, applicationRejectedBody?: string, usageApprovedSubject?: string, usageApprovedBody?: string, usageRejectedSubject?: string, usageRejectedBody?: string }|null}
+ */
 let mailConfig = null;
+// 优先从加密配置文件加载邮件配置，其次使用环境变量（SMTP_USER / SMTP_PASS）
 if (fs.existsSync(mailConfigFile)) {
   try {
     mailConfig = decryptMailConfig(readJson(mailConfigFile));
@@ -1228,10 +1345,23 @@ if (fs.existsSync(mailConfigFile)) {
 } else if (process.env.SMTP_USER && process.env.SMTP_PASS) {
   mailConfig = { email: process.env.SMTP_USER, authCode: process.env.SMTP_PASS };
 }
+/** @type {import('nodemailer').Transporter|null} */
 let mailer = createMailer(mailConfig);
 
+/**
+ * 发送运营邮件（内部工具函数，使用密送 BCC）
+ * - 自动去重收件人、转为小写
+ * - 收件人列表为空、mailer 未初始化时静默返回 false
+ * - 使用 BCC（密送）而非 To，确保收件人之间不可见彼此的邮箱
+ * @param {string} subject 邮件主题
+ * @param {string} text 纯文本正文
+ * @param {string[]} recipients 收件人邮箱列表
+ * @returns {Promise<boolean>}
+ */
 async function sendOperationalMail(subject, text, recipients) {
+  // 第一步：去重 + 过滤空值 + 小写归一化
   const addresses = [...new Set((recipients || []).filter(Boolean).map((email) => String(email).toLowerCase()))];
+  // mailer 未初始化（无邮件配置）或无人可发时静默失败
   if (!mailer || !mailConfig || !addresses.length) return false;
   try {
     await mailer.sendMail({ from: mailFrom(), replyTo: mailConfig.replyTo || mailConfig.email, bcc: addresses, subject, text });
@@ -1242,25 +1372,58 @@ async function sendOperationalMail(subject, text, recipients) {
   }
 }
 
+/**
+ * 获取指定成员 ID 列表中活跃成员的邮箱
+ * - 仅返回状态为 "active" 的成员
+ * - 经过 cleanEmail 清洗邮箱（格式标准化）
+ * - 自动过滤无邮箱或邮箱格式无效的成员
+ * @param {string[]} memberIds
+ * @returns {string[]}
+ */
 function activeMemberEmails(memberIds) {
   const wanted = new Set(memberIds || []);
   return readJson(memberFile).filter((member) => wanted.has(member.id) && member.status === "active").map((member) => cleanEmail(member.email)).filter(Boolean);
 }
 
+/**
+ * 发送项目负责人分配通知邮件
+ * 向被指定为项目负责人的成员发送通知，包含项目说明和成员中心链接
+ * - 自动屏蔽无邮箱的非活跃成员
+ * - 受频率限制：同分配人在同项目中最多 20 次/小时（防止重复分配导致骚扰）
+ * @param {Object} workspace - 项目工作区对象
+ * @param {string[]} managerIds - 负责人成员 ID 列表
+ * @param {Object} assignedBy - 分配人信息（用于审计和邮件署名）
+ * @returns {Promise<{sent: boolean, recipientCount: number, assigneeCount: number, rateLimited?: boolean}>}
+ */
 async function sendWorkspaceLeadNotification(workspace, managerIds, assignedBy) {
   const recipients = activeMemberEmails(managerIds);
   if (!recipients.length) return { sent: false, recipientCount: 0, assigneeCount: managerIds.length };
+  // 频率限制：每个分配人-项目对每小时最多 20 封
   const rateLimit = consumeRateLimits([{ key: `workspace-lead-mail:${assignedBy.id}:${workspace.id}`, limit: 20, interval: 60 * 60 * 1000, scope: "workspace" }]);
   if (!rateLimit.allowed) return { sent: false, recipientCount: recipients.length, assigneeCount: managerIds.length, rateLimited: true };
   const memberUrl = publicBaseUrl ? `${publicBaseUrl}/member.html` : "";
+  // 清理主题中的换行符防止 SMTP 注入
   const subject = `[项目负责人] ${workspace.name}`.replace(/[\r\n]+/g, " ");
   const text = `${workspace.name} 已分配给你负责。\n\n项目说明：${workspace.description || "无"}\n负责人操作：请登录成员中心拆分任务并分配给项目组员。\n分配人：${assignedBy.displayName}\n${memberUrl ? `成员中心：${memberUrl}\n` : ""}`;
   return { sent: await sendOperationalMail(subject, text, recipients), recipientCount: recipients.length, assigneeCount: managerIds.length };
 }
 
+/**
+ * 发送任务分配通知邮件
+ * 向被分配任务的成员发送通知，包含任务详情和截止日期
+ * - 自动屏蔽无邮箱/非活跃成员
+ * - 受频率限制：同分配人在同项目中最多 30 次/小时
+ * - assignedBy 显示优先使用 name，其次 displayName，最后 username
+ * @param {Object} workspace - 项目工作区对象
+ * @param {Object} task - 任务对象（含 title, description, dueDate）
+ * @param {string[]} assigneeIds - 被分配成员 ID 列表
+ * @param {Object} assignedBy - 分配人信息
+ * @returns {Promise<{sent: boolean, recipientCount: number, assigneeCount: number, rateLimited?: boolean}>}
+ */
 async function sendTaskAssignmentNotification(workspace, task, assigneeIds, assignedBy) {
   const recipients = activeMemberEmails(assigneeIds);
   if (!recipients.length) return { sent: false, recipientCount: 0, assigneeCount: assigneeIds.length };
+  // 频率限制：每个分配人-项目对每小时最多 30 封
   const rateLimit = consumeRateLimits([{ key: `workspace-task-mail:${assignedBy.id}:${workspace.id}`, limit: 30, interval: 60 * 60 * 1000, scope: "workspace" }]);
   if (!rateLimit.allowed) return { sent: false, recipientCount: recipients.length, assigneeCount: assigneeIds.length, rateLimited: true };
   const memberUrl = publicBaseUrl ? `${publicBaseUrl}/member.html` : "";
@@ -1269,15 +1432,37 @@ async function sendTaskAssignmentNotification(workspace, task, assigneeIds, assi
   return { sent: await sendOperationalMail(subject, text, recipients), recipientCount: recipients.length, assigneeCount: assigneeIds.length };
 }
 
+/**
+ * 邮件模板渲染函数
+ * 将模板字符串中的 {key} 替换为 values 对象中对应的值
+ * 使用 Object.hasOwn 确保只替换自身属性，不替换原型链属性
+ * @param {string} template - 包含 {占位符} 的模板字符串
+ * @param {Object<string, string>} values - 替换值映射表
+ * @returns {string}
+ */
 function renderMailTemplate(template, values) {
   return template.replace(/\{([^{}]+)\}/g, (placeholder, key) => Object.hasOwn(values, key) ? String(values[key] ?? "") : placeholder);
 }
 
+/**
+ * 发送使用申请审批结果通知邮件（发给申请人）
+ * - 根据审批结果（approved/rejected）选择对应的邮件主题和模板
+ * - 批准时附加领取提示、元器件图片、位置图片等信息（防止图片链接因过长被截断，额外检查是否已包含在模板中）
+ * - 模板支持通过 mailConfig 自定义（优先），其次使用 defaultUsageMailTemplates 默认值
+ * - 模板渲染使用 renderMailTemplate，支持占位符替换
+ * @param {Object} usageRequest - 使用申请对象（含 memberId, memberName, pickupLocation, componentImage 等）
+ * @param {string} decision - "approved" 或 "rejected"
+ * @param {string} reviewNote - 审批意见
+ * @param {Object} adminUser - 审批人信息
+ * @returns {Promise<boolean>}
+ */
 async function sendUsageDecisionEmail(usageRequest, decision, reviewNote, adminUser) {
+  // 查找申请人的当前邮箱（注意：成员邮箱可能已变更，以最新数据为准）
   const currentMember = readJson(memberFile).find((member) => member.id === usageRequest.memberId);
   const recipient = cleanEmail(currentMember?.email);
   if (!mailer || !mailConfig || !recipient) return false;
   const prefix = decision === "approved" ? "approved" : "rejected";
+  // 构建邮件模板替换值映射表（中文字段名便于模板理解）
   const values = {
     申请人: usageRequest.memberName,
     申请编号: usageRequest.id,
@@ -1288,14 +1473,18 @@ async function sendUsageDecisionEmail(usageRequest, decision, reviewNote, adminU
     结果: decision === "approved" ? "已批准" : "未批准",
     领取位置: usageRequest.pickupLocation ? formatStorageLocation(usageRequest.pickupLocation) : "无",
     领取提示: decision === "approved" ? usageRequest.pickupInstruction || "" : "",
+    // 图片链接使用完整 URL（publicBaseUrl + 相对路径），仅在批准时包含
     元器件图片: decision === "approved" && usageRequest.componentImage ? `${publicBaseUrl}${usageRequest.componentImage}` : "",
     位置图片: decision === "approved" && usageRequest.locationImage ? `${publicBaseUrl}${usageRequest.locationImage}` : "",
     审批意见: reviewNote || "无",
     审批人: adminUser.displayName,
     审批时间: usageRequest.reviewedAt
   };
+  // 优先使用 mailConfig 中的自定义模板，否则使用默认模板
   const subject = renderMailTemplate(mailConfig[`usage${prefix[0].toUpperCase()}${prefix.slice(1)}Subject`] || defaultUsageMailTemplates[`${prefix}Subject`], values);
   let text = renderMailTemplate(mailConfig[`usage${prefix[0].toUpperCase()}${prefix.slice(1)}Body`] || defaultUsageMailTemplates[`${prefix}Body`], values);
+  // 批准时的附加信息：如果模板中未包含领取提示/图片，附加到邮件末尾
+  // 这种"附加"方式兼容自定义模板中已包含这些信息的情况，避免重复
   if (decision === "approved" && usageRequest.pickupInstruction && !text.includes(usageRequest.pickupInstruction)) text = `${text.trimEnd()}\n领取提示：${usageRequest.pickupInstruction}\n`;
   if (decision === "approved" && usageRequest.componentImage && !text.includes(values.元器件图片)) text = `${text.trimEnd()}\n元器件图片：${values.元器件图片}\n`;
   if (decision === "approved" && usageRequest.locationImage && !text.includes(values.位置图片)) text = `${text.trimEnd()}\n领取位置图片：${values.位置图片}\n`;
@@ -1308,43 +1497,105 @@ async function sendUsageDecisionEmail(usageRequest, decision, reviewNote, adminU
   }
 }
 
+/**
+ * 检查管理员是否有权限审批指定的加入申请
+ * 条件链路：活跃状态 -> "applications" 面板权限 -> 能访问申请所在部门
+ * @param {Object} admin - 管理员原始对象（含 status 等字段）
+ * @param {Object} application - 申请对象（含 departmentId）
+ * @returns {boolean}
+ */
 function canReviewApplication(admin, application) {
   if (!isActiveAdmin(admin)) return false;
   const user = publicAdmin(admin);
   return hasAdminPanel(user, "applications") && canAccessDepartment(user, application.departmentId);
 }
 
+/**
+ * 判断管理员是否可作为加入申请的邮件审批人
+ * 在 canReviewApplication 的基础上额外要求管理员配置了邮箱
+ * 邮箱用于接收审批通知邮件（包含审批链接）
+ * @param {Object} admin - 管理员原始对象
+ * @param {Object} application - 申请对象
+ * @returns {boolean}
+ */
 function isApplicationApprover(admin, application) {
   return canReviewApplication(admin, application) && Boolean(publicAdmin(admin).email);
 }
 
+/**
+ * 解析加入申请的邮件审批令牌，验证令牌有效性并返回关联信息
+ *
+ * 令牌验证流程（按顺序）：
+ * 1. 格式校验：base64url 编码，精确 43 字符
+ * 2. 在令牌记录库中查找 kind==="application" 且 tokenHash 匹配的记录
+ * 3. 检查令牌是否已被使用（usedAt）或作废（invalidatedAt）
+ * 4. 检查令牌是否过期
+ * 5. 检查令牌 action 是否为 accepted/rejected
+ * 6. 检查对应申请是否存在且状态为待处理
+ * 7. 检查对应管理员是否有审批资格
+ * 8. 检查管理员账号版本和邮箱是否与签发时一致（防止签发后信息变更导致令牌失效应复用）
+ * @param {string} rawToken - 原始令牌字符串
+ * @param {Array} tokenRecords - 令牌记录数组（可选，默认从文件读取）
+ * @param {Array} applications - 申请数组（可选，默认从文件读取）
+ * @param {Array} admins - 管理员数组（可选，默认从文件读取）
+ * @returns {{status?: number, error: string}|{tokenRecord: Object, application: Object, adminUser: Object}}
+ */
 function resolveApplicationEmailApprovalToken(rawToken, tokenRecords = readJson(emailApprovalTokenFile), applications = readJson(applicationFile), admins = readJson(adminFile)) {
+  // 第1步：格式校验——base64url 编码的 32 字节随机数，精确 43 字符
   const token = cleanString(rawToken, 200);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return { status: 404, error: "审批链接无效" };
+  // 第2步：在令牌记录库中查找 kind==="application" 的记录
   const tokenRecord = tokenRecords.find((record) => record.kind === "application" && record.tokenHash === emailApprovalTokenHash(token));
   if (!tokenRecord) return { status: 404, error: "审批链接无效" };
+  // 第3步：检查令牌是否已被使用（usedAt）或作废（invalidatedAt）
   if (tokenRecord.usedAt || tokenRecord.invalidatedAt) return { status: 410, error: "审批链接已使用或已失效" };
+  // 第4步：检查令牌是否过期
   const expiresAt = Date.parse(tokenRecord.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return { status: 410, error: "审批链接已过期" };
+  // 第5步：检查令牌 action 是否合法（接受或拒绝）
   if (!["accepted", "rejected"].includes(tokenRecord.action)) return { status: 404, error: "审批链接无效" };
+  // 第6步：检查对应申请是否存在且状态为待处理
   const application = applications.find((item) => item.id === tokenRecord.requestId);
   if (!application || ["accepted", "rejected"].includes(application.status)) return { status: 410, error: "该申请已处理或删除" };
+  // 第7步：检查对应管理员是否有审批资格
   const admin = admins.find((item) => item.id === tokenRecord.adminId);
   if (!admin || !isApplicationApprover(admin, application)) return { status: 403, error: "审批权限已撤销" };
+  // 第8步：检查管理员账号版本和邮箱是否与签发时一致
+  // 防止签发后管理员信息变更导致令牌被盗用
   const adminUser = publicAdmin(admin);
   if (tokenRecord.adminVersion !== adminApprovalVersion(admin) || tokenRecord.adminEmail !== adminUser.email) return { status: 410, error: "审批账号信息已变更，请使用最新邮件" };
   return { tokenRecord, application, adminUser };
 }
 
+/**
+ * 发送加入申请的邮件审批通知给管理员
+ *
+ * 主要流程：
+ * 1. 筛选有资格审批的管理员（基于 mailConfig.applicationRecipientAdminIds 或 owner 角色）
+ * 2. 在资源锁内：作废该申请之前的旧令牌，为每个管理员签发一对新的审批令牌（接受/拒绝）
+ * 3. 逐一向每个管理员发送带有令牌链接的邮件（HTML+纯文本双版本）
+ * 4. 发送前再次验证申请和审批人状态未改变
+ *
+ * 安全设计：
+ * - 每个管理员每次获得两个一次性链接（接受/拒绝），分别绑定 action
+ * - 令牌 HMAC 哈希存储，原始令牌不落盘
+ * - 链接包含管理员版本指纹，信息变更后自动失效
+ * - 申请一旦被处理，所有未使用的令牌立即作废
+ *
+ * @param {Object} application - 加入申请对象
+ * @returns {Promise<boolean>} 是否有至少一封邮件发送成功
+ */
 async function sendApplicationApprovalEmails(application) {
   if (!mailer || !mailConfig || !validEmailApprovalBaseUrl()) return false;
+  // 筛选审批人：优先使用 mailConfig.applicationRecipientAdminIds 白名单，
+  // 未配置时使用所有 owner 角色管理员（自动去重，按邮箱）
   const configuredIds = Array.isArray(mailConfig.applicationRecipientAdminIds) ? new Set(mailConfig.applicationRecipientAdminIds) : null;
   const seenEmails = new Set();
   const approvers = readJson(adminFile).filter((admin) => {
     if (configuredIds?.size ? !configuredIds.has(admin.id) : admin.role !== "owner") return false;
     if (!isApplicationApprover(admin, application)) return false;
     const email = publicAdmin(admin).email;
-    if (seenEmails.has(email)) return false;
+    if (seenEmails.has(email)) return false; // 同一邮箱只发一次（防止重复配置）
     seenEmails.add(email);
     return true;
   });
@@ -1384,6 +1635,16 @@ async function sendApplicationApprovalEmails(application) {
   return deliveries.some((delivery) => delivery.status === "fulfilled");
 }
 
+/**
+ * 发送加入申请审批结果通知邮件给申请人
+ * - 先验证申请的最新状态与决策时一致（reviewedAt + status 双重校验），防止并发覆盖
+ * - 根据通过/拒绝选择对应模板渲染邮件内容
+ * @param {Object} application - 加入申请对象
+ * @param {string} decision - "accepted" 或 "rejected"
+ * @param {string} reviewNote - 审批意见
+ * @param {Object} adminUser - 审批人信息
+ * @returns {Promise<boolean>}
+ */
 async function sendApplicationDecisionEmail(application, decision, reviewNote, adminUser) {
   const currentApplication = readJson(applicationFile).find((item) => item.id === application.id);
   if (!currentApplication || currentApplication.reviewedAt !== application.reviewedAt || currentApplication.status !== decision) return false;
@@ -1413,6 +1674,16 @@ async function sendApplicationDecisionEmail(application, decision, reviewNote, a
   }
 }
 
+/**
+ * 发送成员问询通知邮件给相关管理员
+ * - 筛选能访问该部门的所有活跃管理员，密送通知
+ * - isFollowUp 为 true 时主题标注"有新回复"，表示这是成员的追加回复
+ * - 回复地址设为提问成员的邮箱，便于管理员直接回复
+ * @param {Object} thread - 问询线程对象
+ * @param {string} [latestMessage=thread.message] - 最新消息内容
+ * @param {boolean} [isFollowUp=false] - 是否为跟进回复
+ * @returns {Promise<boolean>}
+ */
 async function sendMemberQuestionNotification(thread, latestMessage = thread.message, isFollowUp = false) {
   if (!mailer || !mailConfig) return false;
   const recipients = [...new Set(readJson(adminFile).filter((admin) => isActiveAdmin(admin) && canAccessDepartment(publicAdmin(admin), thread.departmentId)).map((admin) => cleanEmail(publicAdmin(admin).email)).filter(Boolean))];
@@ -1432,6 +1703,14 @@ async function sendMemberQuestionNotification(thread, latestMessage = thread.mes
   }
 }
 
+/**
+ * 发送管理员回复通知邮件给提问成员
+ * - 查找成员的最新邮箱（可能已变更），发送回复内容
+ * - 回复地址统一使用 mailConfig.replyTo，防止成员直接回复管理员个人邮箱
+ * @param {Object} thread - 问询线程对象
+ * @param {Object} reply - 管理员回复对象（含 admin.displayName 和 message）
+ * @returns {Promise<boolean>}
+ */
 async function sendMemberQuestionReplyEmail(thread, reply) {
   const recipient = cleanEmail(readJson(memberFile).find((member) => member.id === thread.memberId)?.email);
   if (!mailer || !mailConfig || !recipient) return false;
@@ -1450,6 +1729,23 @@ async function sendMemberQuestionReplyEmail(thread, reply) {
   }
 }
 
+/**
+ * 处理加入申请的审批决策（核心逻辑）
+ *
+ * 两个入口：
+ * 1. rawToken 存在：通过邮件审批令牌处理（自动从令牌解析申请、审批人和决策）
+ * 2. rawToken 为空：管理员在后台直接审批（需提供 applicationId 和 adminUser）
+ *
+ * 处理流程：
+ * 1. 在资源锁内：读取申请数据和令牌记录
+ * 2. 验证申请状态可处理（未转为成员、非已处理状态）
+ * 3. 记录审核信息（审批人、审批时间、审批方式：email/admin）
+ * 4. 如果是邮件审批：将使用的令牌标记为 usedAt，其他同申请令牌作废
+ * 5. 如果是后台审批且申请已有决策但可覆盖：不覆盖旧令牌（保留完整性）
+ *
+ * @param {{applicationId?: string, decision: string, reviewNote: string, adminUser?: Object, rawToken?: string}} params
+ * @returns {Promise<{status?: number, error: string}|{application: Object, adminUser: Object, decision: string, tokenId: string|null}>}
+ */
 async function processApplicationDecision({ applicationId, decision, reviewNote, adminUser, rawToken = "" }) {
   return withResourceLock(async () => {
     const applications = readJson(applicationFile);
@@ -1500,15 +1796,34 @@ async function processApplicationDecision({ applicationId, decision, reviewNote,
   });
 }
 
+/**
+ * 计算成员激活码的 HMAC-SHA256 哈希值
+ * 使用 sessionSecret 作为密钥，前缀 "member-activation:" 防重放
+ * @param {string} code - 原始激活码
+ * @returns {string} hex 编码的哈希值
+ */
 function memberActivationCodeHash(code) {
   return crypto.createHmac("sha256", sessionSecret).update(`member-activation:${code}`).digest("hex");
 }
 
+/**
+ * 生成 10 位人类可读激活码（避免易混淆字符：0/O、1/I/L）
+ * 字符集：ABCDEFGHJKLMNPQRSTUVWXYZ23456789（去掉 0 O I L）
+ * @returns {string} 10 位激活码
+ */
 function generateMemberActivationCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({ length: 10 }, () => alphabet[crypto.randomInt(alphabet.length)]).join("");
 }
 
+/**
+ * 为成员签发一次性激活码
+ * - 自动作废该成员之前的未使用激活码
+ * - 新激活码存储哈希值，原始码以明文返回用于发送
+ * - 保留最近 30 天内的已作废记录，超过的自动清理，总记录上限 10000 条
+ * @param {Object} member - 成员对象
+ * @returns {Promise<{code: string, expiresAt: string}>} 返回明文激活码和过期时间
+ */
 async function issueMemberActivationCode(member) {
   const code = generateMemberActivationCode();
   const now = new Date().toISOString();
@@ -1525,6 +1840,13 @@ async function issueMemberActivationCode(member) {
   return { code, expiresAt };
 }
 
+/**
+ * 发送成员激活码邮件
+ * 告知成员用户名、一次性激活码、激活页面 URL 和操作步骤
+ * @param {Object} member - 成员对象
+ * @param {{code: string, expiresAt: string}} activation - 激活码和过期时间
+ * @returns {Promise<boolean>}
+ */
 async function sendMemberActivationEmail(member, activation) {
   const recipient = cleanEmail(member.email);
   if (!mailer || !mailConfig || !recipient) return false;
@@ -1543,10 +1865,27 @@ async function sendMemberActivationEmail(member, activation) {
   }
 }
 
+/**
+ * 计算邮件审批令牌的 HMAC-SHA256 哈希值
+ * 令牌以明文通过 URL 传递，但存储时仅保存哈希，防止数据库泄露导致令牌被盗用
+ * @param {string} token - 原始令牌（base64url 编码的 32 字节随机数）
+ * @returns {string} hex 编码的哈希值
+ */
 function emailApprovalTokenHash(token) {
   return crypto.createHmac("sha256", sessionSecret).update(token).digest("hex");
 }
 
+/**
+ * 判断管理员是否有资格作为使用申请（材料/资金）的邮件审批人
+ * 条件：
+ * - 管理员有邮箱、未被禁用、未强制修改密码
+ * - 不能审批自己的申请（admin.memberId !== usageRequest.memberId）
+ * - 角色为 owner，或为 reviewer 且拥有 "usage" 面板权限
+ * - 能访问申请所在部门
+ * @param {Object} admin - 管理员对象
+ * @param {Object} usageRequest - 使用申请对象
+ * @returns {boolean}
+ */
 function isEmailApprover(admin, usageRequest) {
   admin = effectiveAdmin(admin);
   if (!admin?.email || admin.status === "disabled" || admin.mustChangePassword) return false;
@@ -1555,11 +1894,26 @@ function isEmailApprover(admin, usageRequest) {
   return (user.role === "owner" || (user.role === "reviewer" && hasAdminPanel(user, "usage"))) && canAccessDepartment(user, usageRequestDepartmentId(usageRequest));
 }
 
+/**
+ * 计算管理员审批版本指纹
+ * 由管理员的 updatedAt（或 createdAt）与关联成员的 updatedAt（或 createdAt）拼接而成
+ * 版本指纹用于绑定审批令牌：管理员或关联成员信息变更后旧令牌自动失效
+ * @param {Object} admin - 管理员对象
+ * @returns {string} 版本指纹字符串
+ */
 function adminApprovalVersion(admin) {
   const member = admin?.memberId ? readJson(memberFile).find((item) => item.id === admin.memberId) : null;
   return `${admin?.updatedAt || admin?.createdAt || ""}:${member?.updatedAt || member?.createdAt || ""}`;
 }
 
+/**
+ * 格式化使用申请的数量/金额显示值
+ * - 先校验申请数据的完整性（id、memberId、memberName 等必要字段）
+ * - 材料类型：返回 "数量 单位"（如 "5 个"）
+ * - 资金类型：返回 "金额 货币"（如 "100.00 元"）
+ * @param {Object} usageRequest - 使用申请对象
+ * @returns {string} 格式化后的显示值，校验不通过返回空字符串
+ */
 function usageRequestDisplayValue(usageRequest) {
   if (!usageRequest?.id || !usageRequest.memberId || !usageRequest.memberName || !usageRequest.departmentId || !usageRequest.targetId || !usageRequest.targetName || cleanString(usageRequest.purpose, 1000).length < 5) return "";
   if (usageRequest.type === "material") {
@@ -1573,6 +1927,12 @@ function usageRequestDisplayValue(usageRequest) {
   return "";
 }
 
+/**
+ * 验证 publicBaseUrl 是否可以作为邮件审批链接的基础 URL
+ * 安全要求：仅允许 HTTPS，或在开发模式下允许本机 HTTP（127.0.0.1/localhost/::1）
+ * 防止令牌链接发送到不安全的第三方站点
+ * @returns {boolean}
+ */
 function validEmailApprovalBaseUrl() {
   try {
     const url = new URL(publicBaseUrl);
@@ -1582,6 +1942,14 @@ function validEmailApprovalBaseUrl() {
   }
 }
 
+/**
+ * 作废指定管理员的所有未使用审批令牌
+ * 当管理员邮箱变更、密码修改或权限撤销时调用，确保旧审批链接失效
+ * @param {string} adminId - 管理员 ID
+ * @param {string} reason - 作废原因（如 "linked-member-password-changed"）
+ * @param {string} [invalidatedAt] - 作废时间 ISO 字符串，默认当前时间
+ * @returns {Promise<void>}
+ */
 async function invalidateAdminEmailApprovalTokens(adminId, reason, invalidatedAt = new Date().toISOString()) {
   const tokenRecords = readJson(emailApprovalTokenFile);
   let changed = false;
@@ -1595,6 +1963,25 @@ async function invalidateAdminEmailApprovalTokens(adminId, reason, invalidatedAt
   if (changed) await writeJson(emailApprovalTokenFile, tokenRecords);
 }
 
+/**
+ * 解析使用申请的邮件审批令牌，验证其有效性并返回关联信息
+ *
+ * 令牌验证流程（与 resolveApplicationEmailApprovalToken 类似，作用于 usage 类型）：
+ * 1. 格式校验：base64url 编码，精确 43 字符（32 字节随机数的 base64url）
+ * 2. 查找 kind!=="application" 的令牌记录
+ * 3. 检查令牌是否已使用或作废（HTTP 410 Gone）
+ * 4. 检查令牌是否过期（HTTP 410）
+ * 5. 检查对应使用申请是否存在且为 pending 状态
+ * 6. 检查申请数据是否完整（usageRequestDisplayValue 非空）
+ * 7. 检查管理员审批资格（HTTP 403 或 410）
+ * 8. 检查管理员版本/邮箱是否与签发时一致
+ *
+ * @param {string} rawToken - 原始令牌
+ * @param {Array} [tokenRecords] - 令牌记录数组
+ * @param {Array} [usageRequests] - 使用申请数组
+ * @param {Array} [admins] - 管理员数组
+ * @returns {{status?: number, error: string}|{token: string, tokenRecord: Object, usageRequest: Object, admin: Object, adminUser: Object}}
+ */
 function resolveEmailApprovalToken(rawToken, tokenRecords = readJson(emailApprovalTokenFile), usageRequests = readJson(usageRequestFile), admins = readJson(adminFile)) {
   const token = cleanString(rawToken, 200);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return { status: 404, error: "审批链接无效" };
@@ -1614,10 +2001,37 @@ function resolveEmailApprovalToken(rawToken, tokenRecords = readJson(emailApprov
   return { token, tokenRecord, usageRequest, admin, adminUser };
 }
 
+/**
+ * HTML 转义函数，防止 XSS 攻击
+ * 转义字符：& < > " ' 分别转为 &amp; &lt; &gt; &quot; &#39;
+ * @param {*} value - 需要转义的值
+ * @returns {string} 转义后的安全 HTML 字符串
+ */
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
 
+/**
+ * 发送使用申请（材料/资金）的邮件审批通知给有资格的管理员
+ *
+ * 完整流程：
+ * 1. 验证邮件配置、审批基础 URL 和申请数据完整性
+ * 2. 筛选所有有资格审批的管理员（去重，按邮箱）
+ * 3. 在资源锁内：作废该申请之前的旧令牌，为每个管理员签发一对新令牌（批准/拒绝）
+ * 4. 邮件中包含 HTML 表格展示申请详情 + 两个审批链接（批准/拒绝）
+ * 5. 每个链接唯一绑定一个管理员和一个 action
+ * 6. 发送前再次验证审批人信息未变更
+ *
+ * 安全措施：
+ * - 令牌存储哈希（emailApprovalTokenHash），原始令牌仅存在于邮件 URL 中
+ * - 每个令牌绑定管理员版本指纹（adminApprovalVersion），信息变更后自动失效
+ * - 令牌过期时间由 emailApprovalTtlMs 控制
+ * - 申请处理完成后所有相关令牌立即作废
+ * - 令牌记录保留 30 天，超过的自动清理，总记录上限 10000
+ *
+ * @param {Object} usageRequest - 使用申请对象
+ * @returns {Promise<boolean>} 是否至少有一封邮件发送成功
+ */
 async function sendUsageApprovalEmails(usageRequest) {
   const value = usageRequestDisplayValue(usageRequest);
   if (!mailer || !mailConfig || !validEmailApprovalBaseUrl() || !value) return false;
@@ -1664,6 +2078,39 @@ async function sendUsageApprovalEmails(usageRequest) {
   return deliveries.some((delivery) => delivery.status === "fulfilled");
 }
 
+/**
+ * 处理使用申请（材料/资金）的审批决策（核心业务逻辑）
+ *
+ * 两个入口：
+ * 1. rawEmailToken 存在：通过邮件审批链接处理，自动解析令牌为申请、审批人和决策
+ * 2. rawEmailToken 为空：管理员在后台直接审批，需提供 requestId 和 adminUser
+ *
+ * 审批处理完整流程（在资源锁内执行，防止竞态）：
+ * 第一阶段 - 校验：
+ *   - 决策值必须为 "approved" 或 "rejected"
+ *   - 申请状态必须为 "pending"
+ *   - 申请数据完整（usageRequestDisplayValue 校验）
+ *   - 申请人不能审批自己的申请
+ *   - 数值（数量/金额）合法
+ *
+ * 第二阶段 - 流水恢复检测：
+ *   - 如果该申请已存在于库存/资金流水（ledger）中，直接恢复（跳过实际扣减）
+ *   - 恢复模式：从 ledger 中读取位置/图片等信息补全到申请记录
+ *
+ * 第三阶段 - 批准执行（仅在决策为 approved 且非恢复模式时）：
+ *   - 验证成员仍有申请权限
+ *   - 验证项目配额或非关联可用量充足
+ *   - 材料类型：扣减库存、记录出库流水、记录领取位置
+ *   - 资金类型：扣减账户余额、记录资金流水
+ *
+ * 第四阶段 - 持久化：
+ *   - 写入审批结果、审批人、审批时间、审批方式（email/admin/ledger-recovery）
+ *   - 作废该申请的其他未使用审批令牌
+ *   - 使用的邮件令牌标记为 usedAt
+ *
+ * @param {{requestId?: string, decision: string, reviewNote: string, adminUser?: Object, rawEmailToken?: string}} params
+ * @returns {Promise<{status?: number, error: string}|{usageRequest: Object, adminUser: Object, tokenId: string|null, decision: string, recovered?: boolean}>}
+ */
 async function processUsageDecision({ requestId, decision, reviewNote, adminUser, rawEmailToken = "" }) {
   return withResourceLock(async () => {
     const requests = readJson(usageRequestFile);
@@ -1793,24 +2240,63 @@ async function processUsageDecision({ requestId, decision, reviewNote, adminUser
   });
 }
 
+// ==================== 全局中间件与公开 API ====================
+
+/**
+ * 全局 API 中间件：no-store 缓存控制 + 同源检查
+ * - 所有 API 响应默认设置 Cache-Control: no-store
+ * - 非 API 路由（HTML/CSS/JS 等静态文件）不受同源检查影响
+ * - 同源检查 = 验证 Origin 或 Referer 与本站同源，防止 CSRF 攻击
+ */
 app.use((request, response, next) => {
   noStore(response);
   if (!sameOrigin(request)) return response.status(403).json({ error: "跨站请求已拒绝" });
   next();
 });
+
+/**
+ * GET /api/health - 健康检查接口
+ * - 受频率限制：单 IP 最多 120 次/分钟
+ * - 返回：服务器运行状态、邮件服务状态、文件写入健康状态
+ */
 app.get("/api/health", (request, response) => {
   const rateLimit = consumeRateLimits([{ key: `health:${request.ip}`, limit: 120, interval: 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) { response.set("Retry-After", String(rateLimit.retryAfter)); return response.status(429).json({ error: "请求过于频繁" }); }
   response.json({ ok: true, mail: Boolean(mailer), writeHealthy: !queueError });
 });
+/**
+ * GET /api/content - 获取公开内容配置
+ * - 受频率限制：单 IP 最多 60 次/分钟
+ * - 返回过滤后的公共内容（不含 _meta 私有字段）
+ */
 app.get("/api/content", (request, response) => {
   const rateLimit = consumeRateLimits([{ key: `content:${request.ip}`, limit: 60, interval: 60 * 1000, scope: "network" }]);
   if (!rateLimit.allowed) { response.set("Retry-After", String(rateLimit.retryAfter)); return response.status(429).json({ error: "请求过于频繁" }); }
   response.json(getPublicContent());
 });
 
+/**
+ * POST /api/applications - 提交加入社团申请
+ *
+ * 安全措施：
+ * - 同源检查（CSRF 防护）
+ * - Honeypot 字段（website）：如果填了值则判定为机器人
+ * - 双层频率限制：申请人维度（3次/30分钟）+ IP 网络维度（30次/10分钟）
+ * - 所有输入字段经过 cleanString/cleanEmail/cleanUrl 清洗
+ * - 申请 IP 哈希去标识化存储（不可逆）
+ *
+ * 验证逻辑：
+ * - 姓名 >= 2 字符，学号 >= 4 字符，班级格式校验，联系方式 >= 3 字符
+ * - 邮箱格式（可选字段，但填了必须合法）
+ * - 必须选择当前开放的部门
+ * - 申请理由 >= 10 字符
+ * - 必须同意招新信息使用说明
+ *
+ * 提交成功后自动触发邮件审批通知 (sendApplicationApprovalEmails)
+ */
 app.post("/api/applications", async (request, response) => {
   if (!sameOrigin(request, true)) return response.status(403).json({ error: "跨站请求被拒绝" });
+  // Honeypot: 隐藏字段 website 若被填值，视为机器人提交
   if (cleanString(request.body.website, 100)) return response.status(400).json({ error: "请求无效" });
 
   const content = readJson(contentFile);
@@ -2502,6 +2988,10 @@ app.put("/api/admin/content", requireAdmin, requirePanel("settings", "projects",
       if (resourceError) return { status: 400, error: resourceError };
     }
     const normalized = normalizeContent(request.body);
+    const duplicateProjectIds = normalized.projects.map((project) => project.id).filter((id, index, ids) => ids.indexOf(id) !== index);
+    if (duplicateProjectIds.length) return { status: 400, error: `项目编号不能重复：${[...new Set(duplicateProjectIds)].join("、")}` };
+    const duplicateAchievementIds = normalized.achievements.map((achievement) => achievement.id).filter((id, index, ids) => ids.indexOf(id) !== index);
+    if (duplicateAchievementIds.length) return { status: 400, error: `成果编号不能重复：${[...new Set(duplicateAchievementIds)].join("、")}` };
     const submittedDepartments = new Map(normalized.departments.map((department) => [department.id, department]));
     const content = {
       settings: hasAdminPanel(request.adminUser, "settings") ? normalized.settings : current.settings,
@@ -3472,8 +3962,8 @@ app.delete("/api/admin/applications/:id", requireAdmin, requirePanel("applicatio
   appendAudit(request, request.adminUser, "application.delete", request.params.id);
   response.json({ ok: true });
 });
-app.get("/api/admin/uploads", requireAdmin, requirePanel("uploads"), requireRole("owner", "editor", "reviewer"), async (_request, response) => {
-  response.json(await listUploads());
+app.get("/api/admin/uploads", requireAdmin, requirePanel("uploads"), requireRole("owner", "editor", "reviewer"), async (request, response) => {
+  response.json(await listUploads(request.query.limit));
 });
 app.post("/api/admin/inventory-image", requireAdmin, requirePanel("inventory"), requireRole("owner", "editor"), (request, response, next) => {
   const rateLimit = consumeRateLimits([{ key: `inventory-image:${request.adminUser.id}`, limit: 60, interval: 60 * 60 * 1000, scope: "admin" }]);
@@ -3592,5 +4082,6 @@ function gracefulShutdown(signal) {
   server.closeIdleConnections?.();
 }
 
+// SIGTERM/SIGINT 信号处理：触发优雅关闭流程
 process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.once("SIGINT", () => gracefulShutdown("SIGINT"));

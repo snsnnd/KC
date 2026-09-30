@@ -53,7 +53,7 @@ JSON 单文件写入采用原子替换，但项目工作区、申请、库存/�
 
 后台“媒体上传”提供服务器文件中心，可查看图片或视频预览、原始文件名、存储文件名、类型、大小、上传时间和上传人，并可直接查看或下载。历史文件没有登记信息时仍会按磁盘元数据列出。
 
-批量上传单个项目时，可复制 `backend/config/project-upload.example.json` 并填写项目清单。海报和视频路径相对清单文件解析，脚本会自动登录、上传媒体并写入最新内容版本：
+上传单个项目可复制 `backend/config/project-upload.example.json`；批量上传使用 `backend/config/project-upload.batch.example.json`。海报和视频路径相对清单文件解析。建议先加 `--dry-run` 完成全量校验，再执行实际上传：
 
 ```bash
 cd backend
@@ -63,7 +63,7 @@ ADMIN_PASSWORD='your-admin-password' \
 npm run upload:project -- /path/to/project.json
 ```
 
-运行账号需要“项目内容”和“媒体上传”权限；不上传本地媒体时也可直接在清单中填写 `poster`、`video` URL。
+运行账号需要“项目内容”和“媒体上传”权限；不上传本地媒体时也可直接填写 `poster`、`video` URL。工具支持单个对象、项目数组和 `{ "projects": [...] }`，会检查重复编号、字段长度、服务器容量和本地媒体，并在媒体上传后重新读取最新内容再一次性新增整批项目。字段和媒体规范见 [`docs/CONTENT_UPLOAD_GUIDE.md`](docs/CONTENT_UPLOAD_GUIDE.md)。
 
 加入申请要求填写姓名、学号、班级、联系方式、申请部门和申请理由，并明确确认招新信息使用说明。班级统一采用 `24通信01` 格式，即两位年份、中文专业和两位班号。申请转为成员后，学号和班级会保留在成员档案中。
 
@@ -122,6 +122,7 @@ npm run test:email-approval
 npm run test:permissions
 npm run test:resources
 npm run test:project-workspace
+npm run test:project-upload
 ```
 
 ## Git 工作流
@@ -130,4 +131,4 @@ npm run test:project-workspace
 
 部署配置位于 `deploy/`。生产前端只接收 `public/` 的内容，通过 `deploy/scripts/deploy-frontend.sh` 发布到独立版本目录并原子切换；后端只部署 `backend/`。普通前端更新不覆盖后端、不接触数据目录，也不重启 API。
 
-生产部署、每日备份、首次手动备份和恢复演练见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)，审计事实与待办见 [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md)。备份默认写入 `/var/backups/tech-club`，绝不能放进 Web 目录；由于归档同时包含数据和 `SESSION_SECRET`，必须另外加密并保存异地副本。
+生产展示端发布到 `/var/www/tech-club-showcase`，管理端发布到 `/var/www/tech-club-control`；二者同域、独立版本和独立回滚，继续共用单个 API 与 `/var/lib/tech-club` 数据目录。生产部署、每日备份、首次手动备份和恢复演练见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)，审计事实与待办见 [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md)。备份默认写入 `/var/backups/tech-club`，绝不能放进 Web 目录；由于归档同时包含数据和 `SESSION_SECRET`，必须另外加密并保存异地副本。

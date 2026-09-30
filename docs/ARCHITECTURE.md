@@ -2,13 +2,16 @@
 
 ## 运行组件
 
-- Nginx 提供 `public/` 静态页面、HTTPS、`/api/` 反向代理和 `/uploads/` 文件访问。
+- Nginx 从 `/var/www/tech-club-showcase/current` 提供展示端、公开工作流和成员页面，从 `/var/www/tech-club-control/current` 提供管理控制台；两套静态发布物同域但可独立发布和回滚。
+- Nginx 统一提供 HTTPS、`/api/` 反向代理和 `/uploads/` 文件访问。
 - Node.js + Express 提供内容、申请、成员权限、邮件、库存、资金和审批 API。
 - `/portal.html` 是管理员与成员的统一身份入口；管理控制台通过查询参数划分运营、人员、资源资金和通知中心四个工作区。
 - systemd 以受强沙箱限制的 `root` 用户运行单个 Node.js 实例，使业务数据文件可保持 root-only 权限。
 - `DATA_DIR` 保存 JSON 运行数据，`UPLOAD_DIR` 保存媒体文件。
 
 Nginx 不读取业务 JSON，只读取独立静态版本目录和公开上传目录。业务 JSON 为 `root:root 0600`；上传文件由 API 校验后显式设为公开只读权限。
+
+静态发布物分离不是后端多实例。展示端、成员端和管理端仍访问同一个 Node.js 进程、`DATA_DIR` 和 `UPLOAD_DIR`，从而保留同源 Cookie、CSRF 校验和进程内文件锁。迁移到数据库事务前，禁止为管理端和展示端分别启动共享 JSON 的 API 进程。
 
 ## 持久化边界
 

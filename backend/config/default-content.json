@@ -1,21 +1,38 @@
 {
+  "//": "================================================================",
+  "//_title": "科创社 CMS — 默认站点内容配置",
+  "//_desc": "当 {DATA_DIR}/content.json 不存在时，server.js 启动时自动将本文件复制为初始内容。管理员可通过管理后台覆盖各项数据。",
+  "//_note": "所有 '//' 开头的键是注释信息，JSON.parse 可正常解析，不会被业务逻辑识别。",
+  "//_security": "resource.accessNote 和 permissionKey 字段控制资源可见性：accessNote 标注访问方式，permissionKey 关联权限点。",
   "settings": {
-    "clubName": "科技创新社",
+    "//": "=== 站点全局设置 ===",
+    "//_clubName": "社团中文名称，显示在网站标题、导航栏和邮件落款中",
+    "clubName": "科创中心",
+    "//_englishName": "社团英文名称，用于界面英文标识",
     "englishName": "TECH SYNERGY LAB",
+    "//_heroTitle": "首页主标题（Slogan）",
     "heroTitle": "让代码拥有身体。",
+    "//_heroDescription": "首页副标题，描述社团宗旨",
     "heroDescription": "我们是一群把想法焊进电路、写入代码的人。从一个传感器，到一台真正理解环境的机器。",
+    "//_contactEmail": "公开联系邮箱，显示在页面底部",
     "contactEmail": "club@example.com",
+    "//_managerEmail": "管理员通知邮箱（覆盖 .env 的 MANAGER_EMAIL）；留空则回退到环境变量。用于接收审批、系统通知等邮件。",
     "managerEmail": ""
   },
+  "//_projects_section": "=== 项目列表 ===",
+  "//_projects_desc": "社团展示项目，映射到首页「项目」板块。每个项目可关联成果（achievements）和资源（resources）。",
   "projects": [
     {
+      "//_id": "唯一标识，格式 SYS_XXX，关联 achievements.projectId",
       "id": "SYS_001",
       "title": "视觉循迹机器人",
       "category": "机器人与控制",
       "description": "融合视觉识别、路径规划与闭环运动控制，在动态赛道中自主判断并完成精准循迹。",
       "tags": ["COMPUTER VISION", "ROS", "CONTROL"],
       "color": "#ff5a36",
+      "//_video": "演示视频 URL（可留空）",
       "video": "",
+      "//_poster": "项目海报图片 URL（可留空）",
       "poster": "",
       "links": [
         { "label": "VIEW SOURCE", "url": "" },
@@ -51,13 +68,17 @@
       ]
     }
   ],
+  "//_achievements_section": "=== 成果列表 ===",
+  "//_achievements_desc": "社团已取得的项目成果，展示在首页「成果」板块。通过 projectId 与项目关联。",
   "achievements": [
     {
+      "//_id": "唯一标识，格式 ACH_XXX",
       "id": "ACH_001",
       "title": "从原型到真实运行",
       "type": "项目成果",
       "description": "完成视觉循迹机器人的软硬件联调、动态赛道测试与可复现实验记录。",
       "date": "2026",
+      "//_projectId": "关联的项目 ID，对应 projects[].id",
       "projectId": "SYS_001",
       "image": "",
       "url": ""
@@ -73,11 +94,20 @@
       "url": ""
     }
   ],
+  "//_departments_section": "=== 部门信息 ===",
+  "//_departments_desc": "社团下设部门，用于成员分组、账号前缀和审批流程中的部门筛选。",
+  "//_departments_accountPrefix": "accountPrefix: 成员登录账号的前缀字母（如 S-001, H-002）",
+  "//_departments_isOpen": "isOpen: 该部门是否开放新成员加入申请",
   "departments": [
     { "id": "software", "name": "软件与算法部", "accountPrefix": "S", "description": "Web、嵌入式、计算机视觉与人工智能。", "isOpen": true },
     { "id": "hardware", "name": "硬件与机械部", "accountPrefix": "H", "description": "电路、PCB、结构设计、制造与运动控制。", "isOpen": true },
     { "id": "product", "name": "产品与运营部", "accountPrefix": "P", "description": "产品设计、视觉表达、活动策划与项目传播。", "isOpen": true }
   ],
+  "//_resources_section": "=== 资源树结构 ===",
+  "//_resources_desc": "成员可访问的学习资源目录，树形结构（含 children）。前台页面通过 /api/member/resources 获取。",
+  "//_resources_permissionKey": "permissionKey: 资源所需的权限点标识；空字符串表示公开。permissionKey 为空时资源对全体成员可见。",
+  "//_resources_accessNote": "accessNote: 访问方式说明文本，在前台显示给成员",
+  "//_resources_security": "安全注意：resource.permissionKey 控制访问权限，应遵循最小权限原则。含敏感链接的资源应设置 permissionKey。",
   "resources": [
     { "id": "starter-kit", "title": "新成员入门资料", "description": "开发环境、基础工具链和社团协作规范。", "type": "BAIDU NETDISK", "url": "", "links": [], "accessNote": "链接由管理员配置", "permissionKey": "resource.basic", "children": [] },
     { "id": "source-index", "title": "开源项目索引", "description": "社团公开项目的源码、文档和版本记录。", "type": "SOURCE CODE", "url": "", "links": [], "accessNote": "链接由管理员配置", "permissionKey": "", "children": [] }
